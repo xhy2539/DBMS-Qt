@@ -14,9 +14,9 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 
 set(PROJECT_SOURCES
         main.cpp
-        xhytestmainwindow.cpp
-        xhytestmainwindow.h
-        xhytestmainwindow.ui
+        mainwindow.cpp
+        mainwindow.h
+        mainwindow.ui
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
@@ -27,6 +27,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         xhyfield.h xhyfield.cpp
         xhydbmanager.h xhydbmanager.cpp
         xhydatabase.h xhydatabase.cpp
+        sqlparser.h sqlparser.cpp
+        xhyrecord.h xhyrecord.cpp
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET DBMS APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR

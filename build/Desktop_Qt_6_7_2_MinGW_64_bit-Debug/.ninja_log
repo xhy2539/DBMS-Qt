@@ -1,0 +1,21 @@
+# ninja log v6
+43	1266	7659888779268291	DBMS_autogen/timestamp	2e0cd570dafd4fd2
+43	1266	7659888779268291	DBMS_autogen/mocs_compilation.cpp	2e0cd570dafd4fd2
+43	1266	7659888779268291	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/timestamp	2e0cd570dafd4fd2
+43	1266	7659888779268291	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/mocs_compilation.cpp	2e0cd570dafd4fd2
+1547	3811	7659888784291045	CMakeFiles/DBMS.dir/xhytable.cpp.obj	e750a3f324f3cf64
+791	3291	7659876085886055	CMakeFiles/DBMS.dir/xhyfield.cpp.obj	b106173e6734b3f3
+1657	4188	7659888785393574	CMakeFiles/DBMS.dir/xhydbmanager.cpp.obj	81769bdbd38e3647
+1755	3711	7659888786373623	CMakeFiles/DBMS.dir/xhydatabase.cpp.obj	71f5ade9ae188912
+1267	3351	7659888781486484	CMakeFiles/DBMS.dir/DBMS_autogen/mocs_compilation.cpp.obj	176800ab2f370bab
+1352	3359	7659888782338376	CMakeFiles/DBMS.dir/main.cpp.obj	387f2bc0ce0a32c5
+1449	4363	7659888783308510	CMakeFiles/DBMS.dir/mainwindow.cpp.obj	291b0e3f6c394597
+393	2371	7659710680571242	CMakeFiles/DBMS.dir/xhyrecord.cpp.obj	7cb1030b5664aed1
+4363	5473	7659888812449800	DBMS.exe	f4b7d7d6b4c2ad0b
+836	2212	7659720183171685	CMakeFiles/DBMS.dir/sqlparser.cpp.obj	93db69d968475518
+36	262	7659898735330769	DBMS_autogen/timestamp	2e0cd570dafd4fd2
+36	262	7659898735330769	DBMS_autogen/mocs_compilation.cpp	2e0cd570dafd4fd2
+36	262	7659898735330769	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/timestamp	2e0cd570dafd4fd2
+36	262	7659898735330769	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/mocs_compilation.cpp	2e0cd570dafd4fd2
+262	2743	7659898737589486	CMakeFiles/DBMS.dir/mainwindow.cpp.obj	291b0e3f6c394597
+2744	3509	7659898762403050	DBMS.exe	f4b7d7d6b4c2ad0b

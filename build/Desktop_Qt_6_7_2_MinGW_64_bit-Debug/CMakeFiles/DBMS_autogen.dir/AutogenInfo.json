@@ -297,6 +297,13 @@
 	"HEADERS" : 
 	[
 		[
+			"G:/C++/DBMS/mainwindow.h",
+			"MU",
+			"EWIEGA46WW/moc_mainwindow.cpp",
+			null
+		],
+		[ "G:/C++/DBMS/sqlparser.h", "MU", "EWIEGA46WW/moc_sqlparser.cpp", null ],
+		[
 			"G:/C++/DBMS/xhydatabase.h",
 			"MU",
 			"EWIEGA46WW/moc_xhydatabase.cpp",
@@ -309,13 +316,8 @@
 			null
 		],
 		[ "G:/C++/DBMS/xhyfield.h", "MU", "EWIEGA46WW/moc_xhyfield.cpp", null ],
-		[ "G:/C++/DBMS/xhytable.h", "MU", "EWIEGA46WW/moc_xhytable.cpp", null ],
-		[
-			"G:/C++/DBMS/xhytestmainwindow.h",
-			"MU",
-			"EWIEGA46WW/moc_xhytestmainwindow.cpp",
-			null
-		]
+		[ "G:/C++/DBMS/xhyrecord.h", "MU", "EWIEGA46WW/moc_xhyrecord.cpp", null ],
+		[ "G:/C++/DBMS/xhytable.h", "MU", "EWIEGA46WW/moc_xhytable.cpp", null ]
 	],
 	"HEADER_EXTENSIONS" : [ "h", "hh", "h++", "hm", "hpp", "hxx", "in", "txx" ],
 	"INCLUDE_DIR" : "G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/include",
@@ -389,11 +391,13 @@
 	"SOURCES" : 
 	[
 		[ "G:/C++/DBMS/main.cpp", "MU", null ],
+		[ "G:/C++/DBMS/mainwindow.cpp", "MU", null ],
+		[ "G:/C++/DBMS/sqlparser.cpp", "MU", null ],
 		[ "G:/C++/DBMS/xhydatabase.cpp", "MU", null ],
 		[ "G:/C++/DBMS/xhydbmanager.cpp", "MU", null ],
 		[ "G:/C++/DBMS/xhyfield.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhytable.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhytestmainwindow.cpp", "MU", null ]
+		[ "G:/C++/DBMS/xhyrecord.cpp", "MU", null ],
+		[ "G:/C++/DBMS/xhytable.cpp", "MU", null ]
 	],
 	"UIC_OPTIONS" : [],
 	"UIC_SEARCH_PATHS" : [],

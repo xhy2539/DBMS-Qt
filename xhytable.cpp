@@ -17,7 +17,38 @@ void xhytable::addfield(const xhyfield& field) {
     m_fields.append(field);
     rebuildIndexes();
 }
+bool xhytable::has_field(const QString& field_name) const {
+    for (const auto& field : m_fields) {
+        if (field.name() == field_name) {
+            return true;
+        }
+    }
+    return false;
+}
 
+void xhytable::add_field(const xhyfield& field) {
+    m_fields.append(field);
+}
+
+void xhytable::remove_field(const QString& field_name) {
+    for (auto it = m_fields.begin(); it != m_fields.end(); ++it) {
+        if (it->name() == field_name) {
+            it = m_fields.erase(it);
+            break;
+        }
+    }
+}
+const xhyfield* xhytable::get_field(const QString& field_name)  {
+    for (const auto& field :m_fields) {
+        if (field.name() == field_name) {
+            return &field;
+        }
+    }
+    return nullptr;
+}
+void xhytable::rename(const QString& new_name) {
+    m_name = new_name;
+}
 void xhytable::addrecord(const xhyrecord& record) {
     m_records.append(record);
 }
@@ -233,6 +264,38 @@ void xhytable::rebuildIndexes() {
     }
 }
 
+// 添加主键
+void xhytable::add_primary_key(const QList<QString>& keys) {
+    // 确保主键数量和字段数量适配
+    for (const auto& key : keys) {
+        if (!m_primaryKeys.contains(key)) {
+            m_primaryKeys.append(key);
+        }
+    }
+}
+
+// 添加外键
+void xhytable::add_foreign_key(const QString& column, const QString& referenceTable, const QString& referenceColumn, const QString& constraintName) {
+    QMap<QString, QString> foreignKey;
+    foreignKey["column"] = column;
+    foreignKey["referenceTable"] = referenceTable;
+    foreignKey["referenceColumn"] = referenceColumn;
+    foreignKey["constraintName"] = constraintName;
+
+    m_foreignKeys.append(foreignKey);
+}
+
+// 添加唯一约束
+void xhytable::add_unique_constraint(const QList<QString>& keys, const QString& constraintName) {
+    if (!m_uniqueConstraints.contains(constraintName)) {
+        m_uniqueConstraints[constraintName] = keys;
+    }
+}
+
+// 添加检查约束
+void xhytable::add_check_constraint(const QString& checkExpression, const QString& constraintName) {
+    m_checkConstraints[constraintName] = checkExpression;
+}
 // 事务支持
 void xhytable::beginTransaction() {
     m_tempRecords = m_records;

@@ -71,17 +71,186 @@ QList<xhydatabase> xhydbmanager::databases() const {
     return m_databases;
 }
 
-// 事务管理方法
-void xhydbmanager::beginTransaction() {
-    if (!m_inTransaction && !current_database.isEmpty()) {
-        if (auto db = find_database(current_database)) {
-            db->beginTransaction();
-            m_inTransaction = true;
-            qDebug() << "Transaction started for database:" << current_database;
-        }
-    }
+// 事务管理
+bool xhydbmanager::beginTransaction() {
+    if (m_inTransaction) return false; // 如果已经在事务中，则返回失败
+    m_inTransaction = true; // 更新事务状态
+    qDebug() << "Transaction started for database:" << current_database;
+    return true;
+}
+bool xhydbmanager::commitTransaction() {
+    if (!m_inTransaction) return false; // 如果不在事务中，则返回失败
+    m_inTransaction = false; // 更新事务状态
+    qDebug() << "Transaction committed for database:" << current_database;
+    return true;
 }
 
+void xhydbmanager::rollbackTransaction() {
+    if (!m_inTransaction) return; // 如果不在事务中，则不执行操作
+    m_inTransaction = false; // 更新事务状态
+    qDebug() << "Transaction rolled back for database:" << current_database;
+}
+bool xhydbmanager::add_column(const QString& database_name, const QString& table_name, const xhyfield& field) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    if (table->has_field(field.name())) {
+        return false; // 字段已存在
+    }
+
+    table->add_field(field);
+    // 保存更改到文件或其他存储中
+    return true;
+}
+bool xhydbmanager::drop_column(const QString& database_name, const QString& table_name, const QString& field_name) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    if (!table->has_field(field_name)) {
+        return false; // 字段不存在
+    }
+
+    table->remove_field(field_name);
+    // 保存更改到文件或其他存储中
+    return true;
+}
+
+bool xhydbmanager::rename_table(const QString& database_name, const QString& old_name, const QString& new_name) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(old_name);
+    if (!table) return false;
+
+    if (db->has_table(new_name)) {
+        return false; // 新名称已存在
+    }
+
+    // 重命名表
+    table->rename(new_name);
+    // 保存更改到文件或其他存储中
+    return true;
+}
+// 解析数据类型字符串转换为枚举值
+xhyfield::datatype parseDataType(const QString& type_str, int& size) {
+    QString upperType = type_str.toUpper();
+    if (upperType == "INT") {
+        return xhyfield::INT;
+    } else if (upperType == "VARCHAR") {
+        return xhyfield::VARCHAR;
+    } else if (upperType == "FLOAT") {
+        return xhyfield::FLOAT;
+    } else if (upperType == "DATE") {
+        return xhyfield::DATE;
+    } else if (upperType == "BOOL") {
+        return xhyfield::BOOL;
+    } else if (upperType.startsWith("CHAR(")) {
+        // 提取CHAR类型的长度
+        int start = upperType.indexOf('(') + 1;
+        int end = upperType.indexOf(')');
+        size = upperType.mid(start, end-start).toInt();
+        return xhyfield::CHAR;
+    }
+    return xhyfield::VARCHAR; // 默认类型
+}
+
+bool xhydbmanager::alter_column(const QString& database_name, const QString& table_name,
+                  const QString& old_field_name, const xhyfield& new_field) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    // 先删除旧字段
+    table->remove_field(old_field_name);
+    // 添加新字段
+    table->add_field(new_field);
+
+    return true;
+}
+bool xhydbmanager::add_constraint(const QString& database_name, const QString& table_name, const QString& field_name, const QString& constraint) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    // 获取字段
+    const xhyfield* old_field = table->get_field(field_name);
+    if (!old_field) return false;
+
+    // 创建新字段并添加约束
+    QStringList constraints = old_field->constraints();
+    constraints.append(constraint);
+    xhyfield new_field(old_field->name(), old_field->type(), constraints);
+
+    // 替换原字段
+    table->remove_field(field_name);
+    table->addfield(new_field);
+
+    return true;
+}
+bool xhydbmanager::drop_constraint(const QString& database_name, const QString& table_name, const QString& constraint_name) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    // 假设我们能通过约束名称找到对应的字段
+    for (auto& field : table->fields()) {
+        auto constraints = field.constraints();
+        if (constraints.contains(constraint_name)) {
+            constraints.removeOne(constraint_name);
+            xhyfield new_field(field.name(), field.type(), constraints);
+            table->remove_field(field.name());
+            table->addfield(new_field);
+            return true; // 删除成功
+        }
+    }
+    return false; // 未找到约束
+}
+bool xhydbmanager::rename_column(const QString& database_name, const QString& table_name, const QString& old_column_name, const QString& new_column_name) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    const xhyfield* old_field = table->get_field(old_column_name);
+    if (!old_field) return false;
+
+    xhyfield new_field(new_column_name, old_field->type(), old_field->constraints());
+    table->remove_field(old_column_name);
+    table->addfield(new_field);
+
+    return true;
+}
+
+// 解析约束字符串列表
+QStringList parseConstraints(const QString& constraints) {
+    QStringList constraintList;
+    if (constraints.isEmpty()) {
+        return constraintList;
+    }
+
+    // 假设约束是以逗号分隔的字符串
+    constraintList = constraints.split(',', Qt::SkipEmptyParts);
+
+    // 去除每个约束前后的空格
+    for (auto& constraint : constraintList) {
+        constraint = constraint.trimmed();
+    }
+
+    return constraintList;
+}
 void xhydbmanager::commit() {
     if (m_inTransaction && !current_database.isEmpty()) {
         if (auto db = find_database(current_database)) {
@@ -98,6 +267,28 @@ void xhydbmanager::commit() {
     }
 }
 
+
+
+bool xhydbmanager::update_table(const QString& database_name, const xhytable& table) {
+    // 找到数据库
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    // 查找要更新的表
+    xhytable* existing_table = db->find_table(table.name());
+    if (!existing_table) return false;
+
+    // 删除旧表
+    db->droptable(existing_table->name());
+
+    // 创建新表
+    db->createtable(table);
+
+    // 保存更新后的新表到文件
+    save_table_to_file(database_name, table.name(), &table);
+
+    return true; // 返回更新成功
+}
 void xhydbmanager::rollback() {
     if (m_inTransaction && !current_database.isEmpty()) {
         if (auto db = find_database(current_database)) {
@@ -342,4 +533,8 @@ xhydatabase* xhydbmanager::find_database(const QString& dbname) {
         }
     }
     return nullptr;
+}
+
+bool xhydbmanager::isInTransaction() const {
+    return m_inTransaction; // 返回当前事务状态
 }

@@ -19,7 +19,14 @@ xhytable* xhydatabase::find_table(const QString& tablename) {
     }
     return nullptr;
 }
-
+bool xhydatabase::has_table(const QString& table_name) const {
+    for (const auto& table : m_tables) {
+        if (table.name() == table_name) {
+            return true;
+        }
+    }
+    return false;
+}
 bool xhydatabase::createtable(const xhytable& table) {
     for (const auto& existing_table : m_tables) {
         if (existing_table.name().toLower() == table.name().toLower()) {

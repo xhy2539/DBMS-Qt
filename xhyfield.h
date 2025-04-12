@@ -6,12 +6,19 @@
 
 class xhyfield {
 public:
-    enum datatype { INT, VARCHAR, FLOAT, DATE, BOOL, CHAR };
+    enum datatype {
+        TINYINT, SMALLINT, INT, BIGINT,
+        FLOAT, DOUBLE, DECIMAL,
+        CHAR, VARCHAR, TEXT,
+        DATE, DATETIME, TIMESTAMP,
+        BOOL, ENUM
+    };
 
     xhyfield(const QString& name = "",
              datatype type = VARCHAR,
              const QStringList& constraints = {});
-
+    void set_enum_values(const QStringList& values);
+    QStringList enum_values() const;
     // 字段属性
     QString name() const;
     datatype type() const;
@@ -26,6 +33,7 @@ public:
     bool validateValue(const QString& value) const;
 
 private:
+     QStringList m_enum_values;
     QString m_name;
     datatype m_type;
     QStringList m_constraints;

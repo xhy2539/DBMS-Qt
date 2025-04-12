@@ -13,7 +13,8 @@ public:
     QString name() const;
     QList<xhytable> tables() const;
     xhytable* find_table(const QString& tablename);
-
+       xhydatabase* find_database(const QString& dbname) const;
+  bool has_table(const QString& table_name) const;
     // 表操作
     bool createtable(const xhytable& table);
     bool droptable(const QString& tablename);

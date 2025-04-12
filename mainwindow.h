@@ -6,6 +6,7 @@
 #include "xhydbmanager.h"
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
+using ConditionTree = QMap<QString, QString>;
 QT_END_NAMESPACE
 
 /**
@@ -32,7 +33,12 @@ public:
     void handleUpdate(const QString &command);
     void handleDelete(const QString &command);
     void handleSelect(const QString &command);
+
     QStringList parseSqlValues(const QString &input);
+    void handleAlterTable(const QString &command);
+    xhyfield::datatype parseDataType(const QString& type_str, int* size = nullptr);
+    QStringList parseConstraints(const QString& constraints);
+    void handleTableConstraint(const QString &constraint_str, xhytable &table);
 private slots:
     /// 处理Run按钮点击事件
     void on_run_clicked();

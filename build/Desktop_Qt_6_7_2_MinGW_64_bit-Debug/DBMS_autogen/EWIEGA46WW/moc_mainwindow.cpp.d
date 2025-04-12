@@ -166,6 +166,42 @@ G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/EWIEGA46WW/mo
   G:/qt6/6.7.2/mingw_64/include/QtWidgets/qwidget.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include-fixed/limits.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include-fixed/syslimits.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/adxintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/ammintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/amxbf16intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/amxint8intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/amxtileintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx2intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx5124fmapsintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx5124vnniwintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512bf16intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512bf16vlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512bitalgintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512bwintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512cdintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512dqintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512erintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512fintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512ifmaintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512ifmavlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512pfintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vbmi2intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vbmi2vlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vbmiintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vbmivlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vlbwintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vldqintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vnniintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vnnivlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vp2intersectintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vp2intersectvlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vpopcntdqintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avx512vpopcntdqvlintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avxintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/avxvnniintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/bmi2intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/bmiintrin.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/c++/algorithm \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/c++/array \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/c++/atomic \
@@ -324,42 +360,224 @@ G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/EWIEGA46WW/mo
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/c++/x86_64-w64-mingw32/bits/gthr-default.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/c++/x86_64-w64-mingw32/bits/gthr.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/c++/x86_64-w64-mingw32/bits/os_defines.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/cetintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/cldemoteintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/clflushoptintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/clwbintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/clzerointrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/emmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/enqcmdintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/f16cintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/fma4intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/fmaintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/fxsrintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/gfniintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/hresetintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/ia32intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/immintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/keylockerintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/lwpintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/lzcntintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/mm3dnow.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/mm_malloc.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/mmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/movdirintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/mwaitxintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/pconfigintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/pkuintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/pmmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/popcntintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/prfchwintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/rdseedintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/rtmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/serializeintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/sgxintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/shaintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/smmintrin.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/stdarg.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/stdbool.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/stddef.h \
   G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/stdint.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/tbmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/tmmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/tsxldtrkintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/uintrintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/vaesintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/vpclmulqdqintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/waitpkgintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/wbnoinvdintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/wmmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/x86gprintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/x86intrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xmmintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xopintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xsavecintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xsaveintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xsaveoptintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xsavesintrin.h \
+  G:/qt6/Tools/mingw1120_64/lib/gcc/x86_64-w64-mingw32/11.2.0/include/xtestintrin.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_bsd_types.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_mingw.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_mingw_mac.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_mingw_off_t.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_mingw_secapi.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_mingw_stat64.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_mingw_unicode.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/_timeval.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/apiset.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/apisetcconv.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/assert.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/basetsd.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/bcrypt.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/bemapiset.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/cderr.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/cguid.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/combaseapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/commdlg.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/concurrencysal.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/corecrt.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/corecrt_startup.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/corecrt_stdio_config.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/corecrt_wstdlib.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/crtdefs.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/ctype.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/datetimeapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/dde.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/ddeml.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/debugapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/dlgs.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/dpapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/driverspecs.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/errhandlingapi.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/errno.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/excpt.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/fibersapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/fileapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/fltwinerror.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/guiddef.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/handleapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/heapapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/imm.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/inaddr.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/interlockedapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/ioapiset.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/jobapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/ktmtypes.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/libloaderapi.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/locale.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/lzexpand.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/mcx.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/memoryapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/minwinbase.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/minwindef.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/mmsystem.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/msxml.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/namedpipeapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/namespaceapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/nb30.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/ncrypt.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/oaidl.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/objbase.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/objidl.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/objidlbase.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/ole2.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/oleauto.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/oleidl.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/poppack.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/process.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/processenv.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/processthreadsapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/processtopologyapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/profileapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/propidl.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/prsht.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_fd_types.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_ip_mreq1.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_ip_types.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_socket_types.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_wsa_errnos.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_wsadata.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/_xmitfile.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/psdk_inc/intrin-impl.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pshpack1.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pshpack2.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pshpack4.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pshpack8.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pthread.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pthread_compat.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pthread_signal.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pthread_time.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/pthread_unistd.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/realtimeapiset.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/reason.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpc.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcasync.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcdce.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcdcep.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcndr.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcnsi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcnsip.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcnterr.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/rpcsal.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sal.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sdkddkver.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sdks/_mingw_ddk.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sec_api/stdio_s.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sec_api/stralign_s.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sec_api/string_s.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sec_api/sys/timeb_s.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sec_api/wchar_s.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/securityappcontainer.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/securitybaseapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/servprov.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/shellapi.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/signal.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/specstrings.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/stdio.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/stralign.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/string.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/stringapiset.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/swprintf.inl \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/synchapi.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sys/timeb.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sys/types.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/sysinfoapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/systemtopologyapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/threadpoolapiset.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/threadpoollegacyapiset.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/time.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/timezoneapi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/tvout.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/unknwn.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/unknwnbase.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/urlmon.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/utilapiset.h \
   G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/vadefs.h \
-  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wchar.h
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/virtdisk.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wchar.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winapifamily.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winbase.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wincon.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wincrypt.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/windef.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/windows.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winefs.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winerror.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wingdi.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winioctl.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winnetwk.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winnls.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winnt.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winperf.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winreg.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winscard.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winsmcrd.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winsock.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winspool.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winsvc.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winuser.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/winver.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wnnc.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wow64apiset.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wtypes.h \
+  G:/qt6/Tools/mingw1120_64/x86_64-w64-mingw32/include/wtypesbase.h

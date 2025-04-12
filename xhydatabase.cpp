@@ -19,7 +19,14 @@ xhytable* xhydatabase::find_table(const QString& tablename) {
     }
     return nullptr;
 }
-
+bool xhydatabase::has_table(const QString& table_name) const {
+    for (const auto& table : m_tables) {
+        if (table.name() == table_name) {
+            return true;
+        }
+    }
+    return false;
+}
 bool xhydatabase::createtable(const xhytable& table) {
     for (const auto& existing_table : m_tables) {
         if (existing_table.name().toLower() == table.name().toLower()) {
@@ -32,15 +39,18 @@ bool xhydatabase::createtable(const xhytable& table) {
 }
 
 bool xhydatabase::droptable(const QString& tablename) {
-    for (auto it = m_tables.begin(); it != m_tables.end(); ++it) {
+    for (auto it = m_tables.begin(); it != m_tables.end();) {
         if (it->name().toLower() == tablename.toLower()) {
-            m_tables.erase(it);
+            it = m_tables.erase(it); // 正确更新迭代器
+            qDebug() << "Table" << tablename << "removed from database" << m_name;
             return true;
+        } else {
+            ++it;
         }
     }
+    qDebug() << "Table" << tablename << "not found in database" << m_name;
     return false;
 }
-
 // 事务管理方法
 void xhydatabase::beginTransaction() {
     if (!m_inTransaction) {

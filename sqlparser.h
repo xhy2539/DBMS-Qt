@@ -8,7 +8,7 @@
 
 class SQLParser {
 public:
-    static QStringList parseMultiLineSQL(const QString& input);
+    static QStringList parseMultiLineSQL(const QString& sqlText);
 };
 
 #endif // SQLPARSER_H

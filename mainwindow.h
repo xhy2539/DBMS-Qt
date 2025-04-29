@@ -17,6 +17,10 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+private slots:
+
+    void on_queryButton_released();
+
 private:
     Ui::MainWindow *ui;
 };

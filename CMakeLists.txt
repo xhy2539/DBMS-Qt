@@ -23,6 +23,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(DBMS-QT
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
+        querywidget.h querywidget.cpp querywidget.ui
+
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET DBMS-QT APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -43,6 +45,9 @@ else()
 endif()
 
 target_link_libraries(DBMS-QT PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+
+find_package(Qt6 COMPONENTS Widgets UiTools REQUIRED)
+target_link_libraries(DBMS-QT PRIVATE Qt6::Widgets Qt6::UiTools)
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an

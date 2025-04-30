@@ -294,31 +294,7 @@
 	"CROSS_CONFIG" : false,
 	"DEP_FILE" : "G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/deps",
 	"DEP_FILE_RULE_NAME" : "DBMS_autogen/timestamp",
-	"HEADERS" : 
-	[
-		[
-			"G:/C++/DBMS/mainwindow.h",
-			"MU",
-			"EWIEGA46WW/moc_mainwindow.cpp",
-			null
-		],
-		[ "G:/C++/DBMS/sqlparser.h", "MU", "EWIEGA46WW/moc_sqlparser.cpp", null ],
-		[
-			"G:/C++/DBMS/xhydatabase.h",
-			"MU",
-			"EWIEGA46WW/moc_xhydatabase.cpp",
-			null
-		],
-		[
-			"G:/C++/DBMS/xhydbmanager.h",
-			"MU",
-			"EWIEGA46WW/moc_xhydbmanager.cpp",
-			null
-		],
-		[ "G:/C++/DBMS/xhyfield.h", "MU", "EWIEGA46WW/moc_xhyfield.cpp", null ],
-		[ "G:/C++/DBMS/xhyrecord.h", "MU", "EWIEGA46WW/moc_xhyrecord.cpp", null ],
-		[ "G:/C++/DBMS/xhytable.h", "MU", "EWIEGA46WW/moc_xhytable.cpp", null ]
-	],
+	"HEADERS" : [],
 	"HEADER_EXTENSIONS" : [ "h", "hh", "h++", "hm", "hpp", "hxx", "in", "txx" ],
 	"INCLUDE_DIR" : "G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/include",
 	"MOC_COMPILATION_FILE" : "G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/mocs_compilation.cpp",
@@ -388,17 +364,7 @@
 	"QT_VERSION_MAJOR" : 6,
 	"QT_VERSION_MINOR" : 7,
 	"SETTINGS_FILE" : "G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/CMakeFiles/DBMS_autogen.dir/AutogenUsed.txt",
-	"SOURCES" : 
-	[
-		[ "G:/C++/DBMS/main.cpp", "MU", null ],
-		[ "G:/C++/DBMS/mainwindow.cpp", "MU", null ],
-		[ "G:/C++/DBMS/sqlparser.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhydatabase.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhydbmanager.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhyfield.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhyrecord.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xhytable.cpp", "MU", null ]
-	],
+	"SOURCES" : [],
 	"UIC_OPTIONS" : [],
 	"UIC_SEARCH_PATHS" : [],
 	"UIC_SKIP" : [],

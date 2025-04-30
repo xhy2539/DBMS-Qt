@@ -121,14 +121,6 @@ build CMakeFiles/DBMS.dir/xhyrecord.cpp.obj: CXX_COMPILER__DBMS_unscanned_Debug 
   OBJECT_DIR = CMakeFiles\DBMS.dir
   OBJECT_FILE_DIR = CMakeFiles\DBMS.dir
 
-build CMakeFiles/DBMS.dir/xdb_types.cpp.obj: CXX_COMPILER__DBMS_unscanned_Debug G$:/C++/DBMS/xdb_types.cpp || cmake_object_order_depends_target_DBMS
-  DEFINES = -DMINGW_HAS_SECURE_API=1 -DQT_CORE_LIB -DQT_GUI_LIB -DQT_NEEDS_QMAIN -DQT_WIDGETS_LIB -DUNICODE -DWIN32 -DWIN64 -D_ENABLE_EXTENDED_ALIGNED_STORAGE -D_UNICODE -D_WIN64
-  DEP_FILE = CMakeFiles\DBMS.dir\xdb_types.cpp.obj.d
-  FLAGS = -DQT_QML_DEBUG -g -std=gnu++17 -fdiagnostics-color=always
-  INCLUDES = -IG:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/include -isystem G:/qt6/6.7.2/mingw_64/include/QtCore -isystem G:/qt6/6.7.2/mingw_64/include -isystem G:/qt6/6.7.2/mingw_64/mkspecs/win32-g++ -isystem G:/qt6/6.7.2/mingw_64/include/QtWidgets -isystem G:/qt6/6.7.2/mingw_64/include/QtGui
-  OBJECT_DIR = CMakeFiles\DBMS.dir
-  OBJECT_FILE_DIR = CMakeFiles\DBMS.dir
-
 
 # =============================================================================
 # Link build statements for EXECUTABLE target DBMS
@@ -137,7 +129,7 @@ build CMakeFiles/DBMS.dir/xdb_types.cpp.obj: CXX_COMPILER__DBMS_unscanned_Debug 
 #############################################
 # Link the executable DBMS.exe
 
-build DBMS.exe: CXX_EXECUTABLE_LINKER__DBMS_Debug CMakeFiles/DBMS.dir/DBMS_autogen/mocs_compilation.cpp.obj CMakeFiles/DBMS.dir/main.cpp.obj CMakeFiles/DBMS.dir/mainwindow.cpp.obj CMakeFiles/DBMS.dir/xhytable.cpp.obj CMakeFiles/DBMS.dir/xhyfield.cpp.obj CMakeFiles/DBMS.dir/xhydbmanager.cpp.obj CMakeFiles/DBMS.dir/xhydatabase.cpp.obj CMakeFiles/DBMS.dir/sqlparser.cpp.obj CMakeFiles/DBMS.dir/xhyrecord.cpp.obj CMakeFiles/DBMS.dir/xdb_types.cpp.obj | G$:/qt6/6.7.2/mingw_64/lib/libQt6Widgets.a G$:/qt6/6.7.2/mingw_64/lib/libQt6Gui.a G$:/qt6/6.7.2/mingw_64/lib/libQt6Core.a G$:/qt6/6.7.2/mingw_64/lib/libQt6EntryPoint.a || DBMS_autogen DBMS_autogen_timestamp_deps
+build DBMS.exe: CXX_EXECUTABLE_LINKER__DBMS_Debug CMakeFiles/DBMS.dir/DBMS_autogen/mocs_compilation.cpp.obj CMakeFiles/DBMS.dir/main.cpp.obj CMakeFiles/DBMS.dir/mainwindow.cpp.obj CMakeFiles/DBMS.dir/xhytable.cpp.obj CMakeFiles/DBMS.dir/xhyfield.cpp.obj CMakeFiles/DBMS.dir/xhydbmanager.cpp.obj CMakeFiles/DBMS.dir/xhydatabase.cpp.obj CMakeFiles/DBMS.dir/sqlparser.cpp.obj CMakeFiles/DBMS.dir/xhyrecord.cpp.obj | G$:/qt6/6.7.2/mingw_64/lib/libQt6Widgets.a G$:/qt6/6.7.2/mingw_64/lib/libQt6Gui.a G$:/qt6/6.7.2/mingw_64/lib/libQt6Core.a G$:/qt6/6.7.2/mingw_64/lib/libQt6EntryPoint.a || DBMS_autogen DBMS_autogen_timestamp_deps
   FLAGS = -DQT_QML_DEBUG -g
   LINK_FLAGS = -mwindows
   LINK_LIBRARIES = G:/qt6/6.7.2/mingw_64/lib/libQt6Widgets.a  G:/qt6/6.7.2/mingw_64/lib/libQt6Gui.a  G:/qt6/6.7.2/mingw_64/lib/libQt6Core.a  -lmpr  -luserenv  -lmingw32  G:/qt6/6.7.2/mingw_64/lib/libQt6EntryPoint.a  -lshell32  -ld3d11  -ldxgi  -ldxguid  -ld3d12  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32

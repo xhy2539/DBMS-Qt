@@ -10,8 +10,6 @@ DBMS_autogen/timestamp: \
 	G:/C++/DBMS/mainwindow.h \
 	G:/C++/DBMS/sqlparser.cpp \
 	G:/C++/DBMS/sqlparser.h \
-	G:/C++/DBMS/xdb_types.cpp \
-	G:/C++/DBMS/xdb_types.h \
 	G:/C++/DBMS/xhydatabase.cpp \
 	G:/C++/DBMS/xhydatabase.h \
 	G:/C++/DBMS/xhydbmanager.cpp \

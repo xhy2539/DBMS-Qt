@@ -303,7 +303,6 @@
 			null
 		],
 		[ "G:/C++/DBMS/sqlparser.h", "MU", "EWIEGA46WW/moc_sqlparser.cpp", null ],
-		[ "G:/C++/DBMS/xdb_types.h", "MU", "EWIEGA46WW/moc_xdb_types.cpp", null ],
 		[
 			"G:/C++/DBMS/xhydatabase.h",
 			"MU",
@@ -394,7 +393,6 @@
 		[ "G:/C++/DBMS/main.cpp", "MU", null ],
 		[ "G:/C++/DBMS/mainwindow.cpp", "MU", null ],
 		[ "G:/C++/DBMS/sqlparser.cpp", "MU", null ],
-		[ "G:/C++/DBMS/xdb_types.cpp", "MU", null ],
 		[ "G:/C++/DBMS/xhydatabase.cpp", "MU", null ],
 		[ "G:/C++/DBMS/xhydbmanager.cpp", "MU", null ],
 		[ "G:/C++/DBMS/xhyfield.cpp", "MU", null ],

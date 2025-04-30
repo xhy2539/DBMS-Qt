@@ -28,7 +28,9 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         xhydbmanager.h xhydbmanager.cpp
         xhydatabase.h xhydatabase.cpp
         sqlparser.h sqlparser.cpp
+
         xhyrecord.h xhyrecord.cpp
+
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET DBMS APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR

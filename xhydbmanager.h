@@ -9,6 +9,7 @@
 #include "xhyfield.h"
 #include "xhyrecord.h"
 #include<windows.h>
+#include <QDir>
 class xhydbmanager {
 public:
     xhydbmanager();
@@ -101,7 +102,8 @@ private:
     void save_table_integrity_file(const QString& filePath, const xhytable* table);
     void save_table_index_file(const QString& filePath, const xhytable* table);
     void update_table_description_file(const QString& dbname, const QString& tablename, const xhytable* table);
-    QString m_dataDir = "G:/C++/DBMS/DBMS_ROOT";
+    QString m_dataDir = QDir::currentPath()
+                        + QDir::separator() + "DBMS_ROOT";
     QList<xhydatabase> m_databases;
     QString current_database;
     bool m_inTransaction = false;

@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include "sqlparser.h"
 #include "xhydbmanager.h"
+#include "ConditionNode.h"
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 using ConditionTree = QMap<QString, QString>;
@@ -23,6 +24,9 @@ public:
 
     xhydatabase *findDatabase(const QString &name);
     bool parseWhereClause(const QString &whereStr, QMap<QString, QString> &conditions);
+    bool parseWhereClause(const QString &whereStr, ConditionNode &root);
+
+
     void handleCreateDatabase(const QString &command);
     void handleUseDatabase(const QString &command);
     void handleDropDatabase(const QString &command);
@@ -39,6 +43,7 @@ public:
     xhyfield::datatype parseDataType(const QString& type_str, int* size = nullptr);
     QStringList parseConstraints(const QString& constraints);
     void handleTableConstraint(const QString &constraint_str, xhytable &table);
+    void flattenConditionTree(const ConditionNode &node, ConditionNode &output);
 private slots:
     /// 处理Run按钮点击事件
     void on_run_clicked();

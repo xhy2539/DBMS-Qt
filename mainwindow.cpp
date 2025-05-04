@@ -3,7 +3,7 @@
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QDebug>
-
+#include <QStack>
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -168,7 +168,6 @@ void MainWindow::handleDropDatabase(const QString& command) {
 // 表操作
 void MainWindow::handleCreateTable(QString& command) {
     QString processedCommand = command.replace(QRegularExpression("\\s+"), " ");
-
     QRegularExpression re("CREATE TABLE\\s+(\\w+)\\s*\\((.*)\\)", QRegularExpression::CaseInsensitiveOption);
     QRegularExpressionMatch match = re.match(processedCommand);
 
@@ -190,40 +189,74 @@ void MainWindow::handleCreateTable(QString& command) {
     QStringList fields = fields_str.split(',', Qt::SkipEmptyParts);
 
     for (const auto& field_str : fields) {
-        QRegularExpression field_re("(\\w+)\\s+(\\w+)(?:\\((\\d+)\\))?(?:\\s+(.+))?", QRegularExpression::CaseInsensitiveOption);
+        QRegularExpression field_re(
+            R"((\w+)\s+(\w+)(?:\((\d+)\))?\s*(.*))", // 匹配字段名、类型、长度和约束
+            QRegularExpression::CaseInsensitiveOption
+            );
         QRegularExpressionMatch field_match = field_re.match(field_str.trimmed());
 
         if (!field_match.hasMatch()) {
-            ui->show->appendPlainText("错误: 列定义必须包含名称和类型");
+            ui->show->appendPlainText("错误: 列定义格式应为 <列名> <类型>[(长度)] [约束]");
             return;
         }
 
-        QString field_name = field_match.captured(1);
-        QString type_str = field_match.captured(2).toUpper();
-        QString size = field_match.captured(3);
-        QStringList constraints = field_match.captured(4).split(' ', Qt::SkipEmptyParts);
+        QString field_name = field_match.captured(1).trimmed();
+        QString type_str = field_match.captured(2).trimmed().toUpper();
+        QString size_str = field_match.captured(3).trimmed();
+        QString constraints_str = field_match.captured(4).trimmed();
 
-        // 检查是否是约束定义而非字段定义
-        if (field_name.toUpper() == "CONSTRAINT") {
-            handleTableConstraint(fields_str, new_table);
-            continue;
+        // 处理 PRIMARY KEY 合并
+        QStringList constraints = constraints_str.split(' ', Qt::SkipEmptyParts);
+        for (int i = 0; i < constraints.size(); ++i) {
+            if (constraints[i].toUpper() == "PRIMARY" &&
+                i + 1 < constraints.size() &&
+                constraints[i+1].toUpper() == "KEY")
+            {
+                constraints[i] = "PRIMARY_KEY";
+                constraints.removeAt(i+1);
+            }
         }
 
+        // 处理其他约束（如 NOT NULL）
+        for (int i = 0; i < constraints.size(); ++i) {
+            if (constraints[i].toUpper() == "NOT" &&
+                i + 1 < constraints.size() &&
+                constraints[i+1].toUpper() == "NULL")
+            {
+                constraints[i] = "NOT_NULL";
+                constraints.removeAt(i+1);
+            }
+        }
+
+        // 强制 VARCHAR 必须指定长度
+        if (type_str == "VARCHAR") {
+            if (size_str.isEmpty()) {
+                ui->show->appendPlainText("错误: VARCHAR 必须指定长度，例如 VARCHAR(255)");
+                return;
+            }
+            bool ok;
+            int varchar_length = size_str.toInt(&ok);
+            if (!ok || varchar_length <= 0) {
+                ui->show->appendPlainText("错误: 无效的 VARCHAR 长度 '" + size_str + "'");
+                return;
+            }
+            constraints.prepend("SIZE(" + size_str + ")");
+        }
+
+        // 解析字段类型
         int size_val = 0;
         xhyfield::datatype type = parseDataType(type_str, &size_val);
 
-        if (type == xhyfield::CHAR && size.isEmpty()) {
-            ui->show->appendPlainText("错误: CHAR类型必须指定长度，如CHAR(1)");
+        // 处理 CHAR 类型长度
+        if (type == xhyfield::CHAR && size_str.isEmpty()) {
+            ui->show->appendPlainText("错误: CHAR 类型必须指定长度，例如 CHAR(20)");
             return;
         }
 
-        if (type == xhyfield::CHAR && size_val > 0) {
-            constraints.prepend("SIZE(" + size + ")");
-        }
-
+        // 创建字段对象
         xhyfield new_field(field_name, type, constraints);
 
-        // 检查主键约束
+        // 添加主键约束
         if (constraints.contains("PRIMARY_KEY")) {
             new_table.add_primary_key({field_name});
         }
@@ -505,7 +538,7 @@ void MainWindow::handleUpdate(const QString& command) {
         }
 
         // 解析WHERE条件
-        ConditionTree conditions;
+        ConditionNode  conditions;
         if (!where_part.isEmpty()) {
             if (!parseWhereClause(where_part, conditions)) {
                 ui->show->appendPlainText("错误: 无效的WHERE条件");
@@ -591,7 +624,7 @@ void MainWindow::handleDelete(const QString& command) {
         }
 
         // 解析WHERE条件
-        ConditionTree conditions;
+        ConditionNode  conditions;
         if (!where_part.isEmpty() && !parseWhereClause(where_part, conditions)) {
             ui->show->appendPlainText("错误: 无效的WHERE条件");
             return;
@@ -633,7 +666,7 @@ void MainWindow::handleSelect(const QString& command) {
     }
 
     QString table_name = match.captured(1);
-    QString where_part = match.captured(2);
+    QString where_part = match.captured(2).trimmed();
     QString current_db = db_manager.get_current_database();
 
     if (current_db.isEmpty()) {
@@ -642,15 +675,20 @@ void MainWindow::handleSelect(const QString& command) {
     }
 
     // 解析WHERE条件
-    ConditionTree conditions;
-    if (!where_part.isEmpty() && !parseWhereClause(where_part, conditions)) {
-        ui->show->appendPlainText("错误: 无效的WHERE条件");
-        return;
-    }
+    ConditionNode conditionRoot;
+     ui->show->appendPlainText(where_part+"111");
+
+        if (!parseWhereClause(where_part, conditionRoot)) {
+            ui->show->appendPlainText("错误: WHERE 条件语法无效");
+            return;
+        }
+
+
+
 
     // 执行查询
     QVector<xhyrecord> results;
-    if (!db_manager.selectData(current_db, table_name, conditions, results)) {
+    if (!db_manager.selectData(current_db, table_name, conditionRoot, results)) {
         ui->show->appendPlainText("错误: 查询失败");
         return;
     }
@@ -690,7 +728,21 @@ void MainWindow::handleSelect(const QString& command) {
         ui->show->appendPlainText(row.trimmed());
     }
 }
-
+// 辅助函数：将条件树扁平化为 QMap
+// 修改 flattenConditionTree 函数
+void MainWindow::flattenConditionTree(const ConditionNode& node, ConditionNode& output) {
+    if (node.type == ConditionNode::COMPARISON) {
+        // 合并 comparison 的键值对
+        for (auto it = node.comparison.constBegin(); it != node.comparison.constEnd(); ++it) {
+            output.comparison.insert(it.key(), it.value()); // 使用 insert 插入键值对
+        }
+    } else {
+        // 递归处理子节点
+        for (const auto& child : node.children) {
+            flattenConditionTree(child, output);
+        }
+    }
+}
 void MainWindow::handleAlterTable(const QString& command) {
     QRegularExpression re(
         "ALTER\\s+TABLE\\s+(\\w+)\\s+(ADD|DROP|ALTER|RENAME|MODIFY)\\s+(COLUMN\\s+)?(.+)",
@@ -940,126 +992,107 @@ QStringList MainWindow::parseSqlValues(const QString& input) {
 
     return values;
 }
-bool MainWindow::parseWhereClause(const QString& whereStr, QMap<QString, QString>& conditions) {
-    QStringList tokens; // 用于保存分解的条件
+bool MainWindow::parseWhereClause(const QString& whereStr, ConditionNode& root) {
+    if (whereStr.trimmed().isEmpty()) {
+        root.type = ConditionNode::COMPARISON;
+        root.comparison["1"] = "= 1"; // 构造恒真条件 1=1
+        return true;
+    }
+    QStack<ConditionNode*> stack;
+    stack.push(&root);
     QString currentToken;
     bool inQuotes = false;
     QChar quoteChar;
-    int parenDepth = 0; // 支持嵌套括号
+    int parenDepth = 0;
 
     for (int i = 0; i < whereStr.length(); ++i) {
         QChar ch = whereStr[i];
 
-        // 处理转义字符
-        if (ch == '\\' && i + 1 < whereStr.length()) {
-            currentToken += whereStr[++i];
-            continue;
-        }
-
-        // 处理引号内的内容
-        if (inQuotes) {
-            currentToken += ch;
-            if (ch == quoteChar) {
+        // 处理引号
+        if (ch == '\'' || ch == '"') {
+            if (!inQuotes) {
+                inQuotes = true;
+                quoteChar = ch;
+            } else if (ch == quoteChar) {
                 inQuotes = false;
             }
+            currentToken += ch;
             continue;
         }
 
         // 处理括号
-        if (ch == '(') {
+        if (ch == '(' && !inQuotes) {
             parenDepth++;
-            currentToken += ch;
+            ConditionNode newChild;
+            newChild.type = ConditionNode::LOGIC_OP;
+            stack.top()->children.append(newChild);
+            stack.push(&stack.top()->children.last());
+            currentToken.clear();
             continue;
-        } else if (ch == ')') {
-            if (parenDepth > 0) {
-                parenDepth--;
-                currentToken += ch;
-                continue;
+        } else if (ch == ')' && !inQuotes) {
+            if (parenDepth == 0) {
+                ui->show->appendPlainText("错误: 括号不匹配");
+                return false;
             }
-            return false; // 不匹配的右括号
-        }
-
-        // 处理引号
-        if (ch == '\'' || ch == '"') {
-            inQuotes = true;
-            quoteChar = ch;
-            currentToken += ch;
+            parenDepth--;
+            stack.pop();
+            currentToken.clear();
             continue;
         }
 
-        // 处理逻辑运算符，不破坏括号内的内容
-        if (parenDepth == 0) {
-            if (whereStr.mid(i, 3).compare("AND", Qt::CaseInsensitive) == 0) {
-                if (!currentToken.isEmpty()) {
-                    tokens.append(currentToken.trimmed());
-                    currentToken.clear();
+        // 处理逻辑运算符
+        if (ch == ' ' && !inQuotes) {
+            QString upperToken = currentToken.trimmed().toUpper();
+            if (upperToken == "AND" || upperToken == "OR") {
+                if (stack.top()->type != ConditionNode::LOGIC_OP) {
+                    ConditionNode newLogicNode;
+                    newLogicNode.type = ConditionNode::LOGIC_OP;
+                    newLogicNode.logicOp = upperToken;
+                    stack.top()->children.append(newLogicNode);
+                    stack.push(&stack.top()->children.last());
+                } else {
+                    stack.top()->logicOp = upperToken;
                 }
-                i += 2; // 跳过 AND
-                continue;
-            } else if (whereStr.mid(i, 2).compare("OR", Qt::CaseInsensitive) == 0) {
-                if (!currentToken.isEmpty()) {
-                    tokens.append(currentToken.trimmed());
-                    currentToken.clear();
-                }
-                i += 1; // 跳过 OR
+                currentToken.clear();
                 continue;
             }
         }
 
         currentToken += ch;
+
+        // 解析原子条件（如 id=1）
+        if ((ch == ' ' || i == whereStr.length() - 1) && !inQuotes) {
+            currentToken = currentToken.trimmed();
+            if (!currentToken.isEmpty()) {
+                QRegularExpression re(R"((\w+)\s*(=|!=|>|<|>=|<=|LIKE|IN)\s*(.*))");
+                QRegularExpressionMatch match = re.match(currentToken);
+                if (match.hasMatch()) {
+                    ConditionNode compNode;
+                    compNode.type = ConditionNode::COMPARISON;
+                    QString value = match.captured(3).trimmed();
+                    if (value.startsWith('\'') || value.startsWith('"')) {
+                        value = value.mid(1, value.length() - 2); // 去除引号
+                    }
+                    compNode.comparison[match.captured(1)] = match.captured(2) + " " + value;
+                    stack.top()->children.append(compNode);
+                } else {
+                    ui->show->appendPlainText("错误: 无效条件表达式 '" + currentToken + "'");
+                    return false;
+                }
+                currentToken.clear();
+            }
+        }
     }
 
-    // 添加最后一个条件
-    if (!currentToken.isEmpty()) {
-        tokens.append(currentToken.trimmed());
+    // 检查括号是否闭合
+    if (parenDepth != 0) {
+        ui->show->appendPlainText("错误: 括号未闭合");
+        return false;
     }
-
-    // 检查括号和引号是否匹配，以及解析每个条件表达式
-    if (parenDepth != 0 || inQuotes) {
-        return false; // 括号或引号未匹配
-    }
-
-    // 解析每个条件表达式
-    for (const QString& token : tokens) {
-        // 支持的操作符：=, !=, <>, >, <, >=, <=, LIKE, NOT LIKE, IN, NOT IN, BETWEEN, IS NULL, IS NOT NULL
-        QRegularExpression re(R"(([\w\d_]+|\(.*\))\s*)"
-                              R"((=|!=|<>|>|<|>=|<=|LIKE|NOT\s+LIKE|IN|NOT\s+IN|BETWEEN|IS\s+NULL|IS\s+NOT\s+NULL)\s*)"
-                              R"((?:('(?:[^']|'')*'|"(?:[^"]|"")*"|[\w\d_]+|\(.*\)|NULL)?))",
-                              QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption
-                              );
-        QRegularExpressionMatch match = re.match(token);
-        if (!match.hasMatch()) {
-            return false; // 无效的条件表达式
-        }
-
-        QString field = match.captured(1).trimmed(); // 获取字段名
-        QString op = match.captured(2).trimmed();   // 获取操作符
-        QString value = match.captured(3).trimmed(); // 获取值
-
-        // 处理NULL相关操作
-        if (op == "IS_NULL" || op == "IS_NOT_NULL") {
-            conditions.insert(field, op);
-            continue;
-        }
-
-        if (value.isEmpty() && !op.contains("NULL")) {
-            return false; // 如果没有值并且不是NULL条件，则无效
-        }
-
-        // 处理引号包围的值
-        if ((value.startsWith('\'') && value.endsWith('\'')) ||
-            (value.startsWith('"') && value.endsWith('"'))) {
-            value = value.mid(1, value.length() - 2); // 去掉引号
-            value.replace("''", "'").replace("\"\"", "\""); // 处理转义引号
-        }
-
-        // 将匹配的条件存储到conditions中
-        conditions.insert(field, op + " " + value);
-    }
-
-    return true; // 成功解析
+    return true;
 }
-    xhyfield::datatype MainWindow::parseDataType(const QString& type_str, int* size) {
+
+xhyfield::datatype MainWindow::parseDataType(const QString& type_str, int* size) {
         QString upperType = type_str.toUpper();
         if (upperType == "INT") {
             return xhyfield::INT;

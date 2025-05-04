@@ -10,9 +10,11 @@
 #include "xhyrecord.h"
 #include<windows.h>
 #include <QDir>
+#include"ConditionNode.h"
 class xhydbmanager {
 public:
     xhydbmanager();
+
 //描述性文件模块
 // 定义结构体
 #pragma pack(push, 1)
@@ -40,6 +42,7 @@ public:
         char name[128];
         int type;
         int param;
+        int size;
         SYSTEMTIME mtime;
         int integrities;
     };
@@ -77,9 +80,8 @@ public:
 
     // 数据操作
     bool insertData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& fieldValues);
-    int updateData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& updates, const QMap<QString, QString>& conditions);
-    int deleteData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& conditions);
-    bool selectData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& conditions, QVector<xhyrecord>& results);
+    int updateData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& updates,  ConditionNode &conditions);
+    bool selectData(const QString& dbname, const QString& tablename,  const ConditionNode &conditions, QVector<xhyrecord>& results);
 
     // 辅助函数
     void save_table_to_file(const QString& dbname, const QString& tablename, const xhytable* table);
@@ -96,6 +98,9 @@ public:
     void commit();
     void rollback();
     void save_index_file(const QString &dbname, const QString &indexname, const QVector<QPair<QString, quint64> > &indexData);
+    int deleteData(const QString &dbname, const QString &tablename,  const ConditionNode &conditions);
+    void load_table_records(const QString &trd_path, xhytable &table);
+    void load_table_definition(const QString &tdf_path, xhytable &table);
 private:
     void save_table_definition_file(const QString& filePath, const xhytable* table);
     void save_table_records_file(const QString& filePath, const xhytable* table);

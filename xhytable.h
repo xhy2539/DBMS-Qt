@@ -8,7 +8,7 @@
 #include <QRegularExpression>
 #include <stdexcept>
 #include <QVector>
-
+#include"ConditionNode.h"
 class xhytable {
 public:
     explicit xhytable(const QString& name = "");
@@ -27,9 +27,7 @@ public:
     void add_check_constraint(const QString& condition, const QString& constraintName);
     // 数据操作
     bool insertData(const QMap<QString, QString>& fieldValues);
-    int updateData(const QMap<QString, QString>& updates, const QMap<QString, QString>& conditions);
-    int deleteData(const QMap<QString, QString>& conditions);
-    bool selectData(const QMap<QString, QString>& conditions, QVector<xhyrecord>& results);
+    bool selectData(const ConditionNode &conditions, QVector<xhyrecord>& results);
     bool has_field(const QString& field_name) const;
     void add_field(const xhyfield& field);
     void remove_field(const QString& field_name);
@@ -41,12 +39,17 @@ public:
     void rollback();
 
     const xhyfield *get_field(const QString &field_name);
+    bool validateTypeForCondition(xhyfield::datatype type, const QString &value, const QString &op) const;
+    bool compareValues(const QString &actual, const QString &expected, xhyfield::datatype type, bool lessThan) const;
+    xhyfield::datatype getFieldType(const QString &fieldName) const;
+    bool matchConditions(const xhyrecord &record, const ConditionNode &condition) const;
+    int deleteData(const ConditionNode &conditions);
+    int updateData(const QMap<QString, QString> &updates, const ConditionNode &conditions);
 private:
     // 验证方法
     void validateRecord(const QMap<QString, QString>& values) const;
     bool validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const;
     bool checkConstraint(const xhyfield& field, const QString& value) const;
-    bool matchConditions(const xhyrecord& record, const QMap<QString, QString>& conditions) const;
 
     // 索引重建
     void rebuildIndexes();

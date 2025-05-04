@@ -1,5 +1,6 @@
 G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/EWIEGA46WW/moc_mainwindow.cpp: G:/C++/DBMS/mainwindow.h \
   G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/DBMS_autogen/moc_predefs.h \
+  G:/C++/DBMS/ConditionNode.h \
   G:/C++/DBMS/sqlparser.h \
   G:/C++/DBMS/xhydatabase.h \
   G:/C++/DBMS/xhydbmanager.h \

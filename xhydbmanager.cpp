@@ -385,7 +385,7 @@ bool xhydbmanager::insertData(const QString& dbname, const QString& tablename, c
     return false;
 }
 
-int xhydbmanager::updateData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& updates, const QMap<QString, QString>& conditions) {
+int xhydbmanager::updateData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& updates,  ConditionNode & conditions) {
     for (auto& db : m_databases) {
         if (db.name() == dbname) {
             int affected = db.updateData(tablename, updates, conditions);
@@ -401,7 +401,7 @@ int xhydbmanager::updateData(const QString& dbname, const QString& tablename, co
     return 0;
 }
 
-int xhydbmanager::deleteData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& conditions) {
+int xhydbmanager::deleteData(const QString& dbname, const QString& tablename, const ConditionNode& conditions) {
     for (auto& db : m_databases) {
         if (db.name() == dbname) {
             int affected = db.deleteData(tablename, conditions);
@@ -417,7 +417,7 @@ int xhydbmanager::deleteData(const QString& dbname, const QString& tablename, co
     return 0;
 }
 
-bool xhydbmanager::selectData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& conditions, QVector<xhyrecord>& results) {
+bool xhydbmanager::selectData(const QString& dbname, const QString& tablename,const ConditionNode & conditions, QVector<xhyrecord>& results) {
     for (auto& db : m_databases) {
         if (db.name() == dbname) {
             return db.selectData(tablename, conditions, results);
@@ -434,89 +434,116 @@ void xhydbmanager::save_database_to_file(const QString& dbname) {
 }
 
 void xhydbmanager::load_databases_from_files() {
-
     QDir data_dir(QString("%1/data").arg(m_dataDir));
     QStringList db_dirs = data_dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
 
     for (const QString& dbname : db_dirs) {
         xhydatabase db(dbname);
-         QDir db_dir(data_dir.filePath(dbname));
-        QStringList table_files = db_dir.entryList(QStringList() << "*.json", QDir::Files);
+        QDir db_dir(data_dir.filePath(dbname));
+        QStringList table_files = db_dir.entryList(QStringList() << "*.tdf", QDir::Files);
 
         for (const QString& table_file : table_files) {
-            QString table_name = table_file.left(table_file.length() - 5);
-            QFile file(db_dir.filePath(table_file));
+            QString table_name = table_file.left(table_file.length() - 4); // 去掉 .tdf 后缀
+            QFile tdfFile(db_dir.filePath(table_file));
 
-            if (file.open(QIODevice::ReadOnly)) {
-                QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-                QJsonObject table_obj = doc.object();
+            if (tdfFile.open(QIODevice::ReadOnly)) {
+                QDataStream in(&tdfFile);
+                in.setVersion(QDataStream::Qt_5_15);
 
                 xhytable table(table_name);
-                QJsonArray fields = table_obj["fields"].toArray();
+                while (!in.atEnd()) {
+                    FieldBlock fb;
+                    in.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
 
-                for (const auto& field_val : fields) {
-                    QJsonObject field_obj = field_val.toObject();
-                    QString name = field_obj["name"].toString();
-                    QString type_str = field_obj["type"].toString();
-
-                    xhyfield::datatype type;
+                    QString name(fb.name);
+                    xhyfield::datatype type = static_cast<xhyfield::datatype>(fb.type);
                     QStringList constraints;
 
-                    // 解析类型
-                    if (type_str == "INT") {
-                        type = xhyfield::INT;
-                    }
-                    else if (type_str == "VARCHAR") {
-                        type = xhyfield::VARCHAR;
-                    }
-                    else if (type_str == "FLOAT") {
-                        type = xhyfield::FLOAT;
-                    }
-                    else if (type_str == "DATE") {
-                        type = xhyfield::DATE;
-                    }
-                    else if (type_str == "BOOL") {
-                        type = xhyfield::BOOL;
-                    }
-                    else if (type_str.startsWith("CHAR(")) {
-                        type = xhyfield::CHAR;
-                        // 提取CHAR类型的长度
-                        QString size_str = type_str.mid(5, type_str.indexOf(')')-5);
-                        constraints.append("SIZE(" + size_str + ")");
-                    }
-                    else {
-                        type = xhyfield::VARCHAR; // 默认类型
-                    }
-
-                    // 添加约束
-                    for (const auto& c : field_obj["constraints"].toArray()) {
-                        constraints.append(c.toString());
-                    }
+                    if (fb.integrities & 0x01) constraints.append("PRIMARY_KEY");
+                    if (fb.integrities & 0x02) constraints.append("NOT_NULL");
+                    if (fb.integrities & 0x04) constraints.append("UNIQUE");
 
                     table.addfield(xhyfield(name, type, constraints));
                 }
 
-                // 加载记录
-                QJsonArray records = table_obj["records"].toArray();
-                for (const auto& record_val : records) {
-                    QJsonObject record_obj = record_val.toObject();
-                    xhyrecord record;
+                // 加载记录文件 (.trd)
+                QString trdFilePath = QString("%1/%2.trd").arg(db_dir.path(), table_name);
+                QFile trdFile(trdFilePath);
+                if (trdFile.open(QIODevice::ReadOnly)) {
+                    QDataStream recordStream(&trdFile);
+                    recordStream.setVersion(QDataStream::Qt_5_15);
 
-                    for (const auto& field : table.fields()) {
-                        QString value = record_obj[field.name()].toString();
-                        record.insert(field.name(), value);
+                    while (!recordStream.atEnd()) {
+                        quint32 recordSize;
+                        recordStream >> recordSize;
+
+                        QByteArray recordData(recordSize, 0);
+                        recordStream.readRawData(recordData.data(), recordSize);
+
+                        QDataStream recordInputStream(recordData);
+                        recordInputStream.setVersion(QDataStream::Qt_5_15);
+
+                        xhyrecord record;
+                        for (const auto& field : table.fields()) {
+                            QString value;
+                            switch (field.type()) {
+                            case xhyfield::INT:
+                                qint32 intValue;
+                                recordInputStream >> intValue;
+                                value = QString::number(intValue);
+                                break;
+                            case xhyfield::FLOAT:
+                                float floatValue;
+                                recordInputStream >> floatValue;
+                                value = QString::number(floatValue);
+                                break;
+                            case xhyfield::VARCHAR:
+                            case xhyfield::CHAR: {
+                                QByteArray strBytes;
+                                recordInputStream >> strBytes;
+                                value = QString::fromUtf8(strBytes);
+                                break;
+                            }
+                            case xhyfield::DATE: {
+                                QDate date;
+                                recordInputStream >> date;
+                                value = date.toString("yyyy-MM-dd");
+                                break;
+                            }
+                            case xhyfield::DATETIME: {
+                                QDateTime datetime;
+                                recordInputStream >> datetime;
+                                value = datetime.toString("yyyy-MM-dd HH:mm:ss");
+                                break;
+                            }
+                            case xhyfield::BOOL: {
+                                bool boolValue;
+                                recordInputStream >> boolValue;
+                                value = boolValue ? "1" : "0";
+                                break;
+                            }
+                            default:
+                                qWarning() << "Unsupported data type for field:" << field.name();
+                                break;
+                            }
+                            record.insert(field.name(), value);
+                        }
+                        table.addrecord(record);
                     }
-
-                    table.addrecord(record);
+                } else {
+                    qWarning() << "Failed to open TRD file:" << trdFilePath;
                 }
 
                 db.createtable(table);
+            } else {
+                qWarning() << "Failed to open TDF file:" << tdfFile.fileName();
             }
         }
 
         m_databases.append(db);
     }
 }
+
 
 xhydatabase* xhydbmanager::find_database(const QString& dbname) {
     for (auto& db : m_databases) {
@@ -741,7 +768,7 @@ void xhydbmanager::save_index_file(const QString& dbname, const QString& indexna
 void xhydbmanager::save_table_to_file(const QString& dbname, const QString& tablename, const xhytable* table) {
     if (!table) return;
 
-   QString basePath = QString("%1/data/%2/%3").arg(m_dataDir, dbname, tablename);
+    QString basePath = QString("%1/data/%2/%3").arg(m_dataDir, dbname, tablename);
     QDir().mkpath(QFileInfo(basePath).path());
 
     // 保存表定义文件(.tdf)
@@ -758,4 +785,6 @@ void xhydbmanager::save_table_to_file(const QString& dbname, const QString& tabl
 
     // 更新表描述文件([数据库名].tb)
     update_table_description_file(dbname, tablename, table);
+
+    qDebug() << "表" << tablename << "已成功保存到文件";
 }

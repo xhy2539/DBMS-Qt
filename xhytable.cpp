@@ -83,7 +83,7 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValues) {
     }
 }
 
-int xhytable::updateData(const QMap<QString, QString>& updates, const QMap<QString, QString>& conditions) {
+int xhytable::updateData(const QMap<QString, QString>& updates, const ConditionNode & conditions) {
     int affected = 0;
     for(auto& record : m_records) {
         if(matchConditions(record, conditions)) {
@@ -96,7 +96,7 @@ int xhytable::updateData(const QMap<QString, QString>& updates, const QMap<QStri
     return affected;
 }
 
-int xhytable::deleteData(const QMap<QString, QString>& conditions) {
+int xhytable::deleteData(const ConditionNode&  conditions) {
     int affected = 0;
     for(auto it = m_records.begin(); it != m_records.end();) {
         if(matchConditions(*it, conditions)) {
@@ -109,7 +109,7 @@ int xhytable::deleteData(const QMap<QString, QString>& conditions) {
     return affected;
 }
 
-bool xhytable::selectData(const QMap<QString, QString>& conditions, QVector<xhyrecord>& results) {
+bool xhytable::selectData(const ConditionNode & conditions, QVector<xhyrecord>& results) {
     results.clear();
     for(const auto& record : m_records) {
         if(matchConditions(record, conditions)) {
@@ -208,50 +208,161 @@ bool xhytable::checkConstraint(const xhyfield& field, const QString& value) cons
     return re.match(value).hasMatch();
 }
 
-// 条件解析
-bool xhytable::matchConditions(const xhyrecord& record, const QMap<QString, QString>& conditions) const {
-    if(conditions.isEmpty()) return true; // 没有条件自动匹配
-
-    for(auto it = conditions.begin(); it != conditions.end(); ++it) {
-        const QString& field = it.key();
-        const QString expr = it.value();
-
-        QRegularExpression re(R"(([!=<>]+|LIKE|IN|BETWEEN)\s*(.+))");
-        QRegularExpressionMatch match = re.match(expr);
-
-        if(!match.hasMatch()) continue;
-
-        QString op = match.captured(1);
-        QString val = match.captured(2).replace("'", "");
-        QString actualVal = record.value(field);
-
-        if(op == "=") {
-            if(actualVal != val) return false;
-        }
-        else if(op == "!=" || op == "<>") {
-            if(actualVal == val) return false;
-        }
-        else if(op == ">") {
-            if(actualVal.toDouble() <= val.toDouble()) return false;
-        }
-        else if(op == "<") {
-            if(actualVal.toDouble() >= val.toDouble()) return false;
-        }
-        else if(op == "LIKE") {
-            QRegularExpression pattern(
-                "^" + val.replace("%", ".*").replace("_", ".") + "$",
-                QRegularExpression::CaseInsensitiveOption
-                );
-            if(!pattern.match(actualVal).hasMatch()) return false;
-        }
-        else if(op == "IN") {
-            QStringList options = val.mid(1, val.length()-2).split(',');
-            if(!options.contains(actualVal)) return false;
-        }
+// 增强条件解析与验证
+bool xhytable::matchConditions(const xhyrecord& record, const ConditionNode& condition) const {
+    if (condition.type != ConditionNode::LOGIC_OP && condition.type != ConditionNode::COMPARISON) {
+        return true;
     }
-    return true;
+    // 处理逻辑运算符节点 (AND/OR)
+    if (condition.type == ConditionNode::LOGIC_OP) {
+        bool result = false;
+        const QString op = condition.logicOp.toUpper();
+
+        if (op == "AND") {
+            result = true;
+            // 遍历所有子条件，全部需满足
+            for (const auto& child : condition.children) {
+                if (!matchConditions(record, child)) {
+                    result = false;
+                    break;
+                }
+
+            }
+        }
+        else if (op == "OR") {
+            // 任一子条件满足即可
+            for (const auto& child : condition.children) {
+                if (matchConditions(record, child)) {
+                    result = true;
+                    break;
+                }
+            }
+        }
+        else {
+            throw std::runtime_error("未知逻辑运算符: " + op.toStdString());
+        }
+        return result;
+    }
+
+    // 处理原子比较条件节点 (字段比较)
+    else if (condition.type == ConditionNode::COMPARISON) {
+        const QString& fieldName = condition.comparison.firstKey();
+        const QString expr = condition.comparison.value(fieldName);
+        if (condition.comparison["1"] == "= 1") {
+            return true; // 直接返回 true
+        }
+        // --- 原有字段存在性检查 ---
+        if (!has_field(fieldName)) {
+            throw std::runtime_error("字段不存在: " + fieldName.toStdString());
+        }
+
+        // --- 获取字段类型和实际值 ---
+        xhyfield::datatype fieldType = getFieldType(fieldName);
+        QString actualVal = record.value(fieldName);
+
+        // --- 解析操作符和值（完整保留原有逻辑）---
+        QRegularExpression re(
+            R"(^\s*(!=|<>|>=|<=|>|<|=|LIKE|IN|BETWEEN|IS\s+NOT\s+NULL|IS\s+NULL)\s*(.+)$)",
+            QRegularExpression::CaseInsensitiveOption
+            );
+        QRegularExpressionMatch match = re.match(expr);
+        if (!match.hasMatch()) {
+            throw std::runtime_error("无效的条件表达式: " + expr.toStdString());
+        }
+
+        QString op = match.captured(1).toUpper().replace(" ", "");
+        QString val = match.captured(2).trimmed().replace("'", "");
+
+        // --- 根据操作符处理逻辑 ---
+        if (op == "ISNULL") {
+            return actualVal.isEmpty();
+        } else if (op == "ISNOTNULL") {
+            return !actualVal.isEmpty();
+        }
+
+        // --- 类型检查 ---
+        if (!validateTypeForCondition(fieldType, val, op)) {
+            throw std::runtime_error("字段类型与条件值不匹配: " + fieldName.toStdString());
+        }
+
+        // --- 具体比较逻辑 ---
+        if (op == "=") {
+            return (actualVal == val);
+        } else if (op == "!=" || op == "<>") {
+            return (actualVal != val);
+        } else if (op == ">") {
+            return compareValues(actualVal, val, fieldType, false);
+        } else if (op == "<") {
+            return compareValues(actualVal, val, fieldType, true);
+        } else if (op == ">=") {
+            return !compareValues(actualVal, val, fieldType, true);
+        } else if (op == "<=") {
+            return !compareValues(actualVal, val, fieldType, false);
+        } else if (op == "LIKE") {
+            QRegularExpression pattern(
+                "^" + QRegularExpression::wildcardToRegularExpression(val) + "$",
+                QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption
+                );
+            return pattern.match(actualVal).hasMatch();
+        } else if (op == "IN") {
+            QStringList options = val.mid(1, val.length()-2).split(',', Qt::SkipEmptyParts);
+            for (const QString& opt : options) {
+                if (actualVal == opt.trimmed()) {
+                    return true;
+                }
+            }
+            return false;
+        } else if (op == "BETWEEN") {
+            QStringList range = val.split(" AND ");
+            if (range.size() != 2) {
+                throw std::runtime_error("BETWEEN 需要两个值");
+            }
+            QString lower = range[0].trimmed();
+            QString upper = range[1].trimmed();
+            return (compareValues(actualVal, lower, fieldType, false) &&
+                    compareValues(actualVal, upper, fieldType, true));
+        }
+
+        throw std::runtime_error("不支持的操作符: " + op.toStdString());
+    }
+
+    throw std::runtime_error("未知的条件节点类型");
 }
 
+// 类型验证辅助函数
+bool xhytable::validateTypeForCondition(xhyfield::datatype type, const QString& value, const QString& op) const {
+    if (op == "ISNULL" || op == "ISNOTNULL") return true; // 无需值验证
+
+    switch(type) {
+    case xhyfield::INT:
+        return value.toInt();
+    case xhyfield::FLOAT:
+        return value.toDouble();
+    case xhyfield::DATE:
+        return QDate::fromString(value, Qt::ISODate).isValid();
+    case xhyfield::BOOL:
+        return value == "true" || value == "false" || value == "1" || value == "0";
+    default:
+        return true; // 字符串类型无需额外验证
+    }
+}
+
+// 通用值比较函数
+bool xhytable::compareValues(const QString& actual, const QString& expected, xhyfield::datatype type, bool lessThan) const {
+    switch(type) {
+    case xhyfield::INT:
+        return lessThan ? (actual.toInt() < expected.toInt()) : (actual.toInt() > expected.toInt());
+    case xhyfield::FLOAT:
+        return lessThan ? (actual.toDouble() < expected.toDouble()) : (actual.toDouble() > expected.toDouble());
+    case xhyfield::DATE: {
+        QDate a = QDate::fromString(actual, Qt::ISODate);
+        QDate b = QDate::fromString(expected, Qt::ISODate);
+        return lessThan ? (a < b) : (a > b);
+    }
+    default: // 字符串按字典序比较
+        return lessThan ? (actual < expected) : (actual > expected);
+    }
+}
 // 索引重建方法
 void xhytable::rebuildIndexes() {
     // 这里实现索引重建逻辑
@@ -307,4 +418,12 @@ void xhytable::commit() {
 
 void xhytable::rollback() {
     m_records = m_tempRecords;
+}
+xhyfield::datatype xhytable::getFieldType(const QString& fieldName) const {
+    for (const auto& field : m_fields) {
+        if (field.name() == fieldName) {
+            return field.type();
+        }
+    }
+    throw std::runtime_error("字段不存在: " + fieldName.toStdString());
 }

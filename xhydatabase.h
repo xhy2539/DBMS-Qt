@@ -4,7 +4,7 @@
 #include <QString>
 #include <QList>
 #include "xhytable.h"
-
+#include"ConditionNode.h"
 class xhydatabase {
 public:
     explicit xhydatabase(const QString& name);
@@ -28,11 +28,11 @@ public:
     bool insertData(const QString& tablename, const QMap<QString, QString>& fieldValues);
     int updateData(const QString& tablename,
                    const QMap<QString, QString>& updates,
-                   const QMap<QString, QString>& conditions);
+                   const ConditionNode &conditions);
     int deleteData(const QString& tablename,
-                   const QMap<QString, QString>& conditions);
+                   const ConditionNode &conditions);
     bool selectData(const QString& tablename,
-                    const QMap<QString, QString>& conditions,
+                    const ConditionNode &conditions,
                     QVector<xhyrecord>& results);
 
 private:

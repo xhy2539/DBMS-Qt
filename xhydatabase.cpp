@@ -89,7 +89,7 @@ bool xhydatabase::insertData(const QString& tablename, const QMap<QString, QStri
     }
 }
 
-int xhydatabase::updateData(const QString& tablename, const QMap<QString, QString>& updates, const QMap<QString, QString>& conditions) {
+int xhydatabase::updateData(const QString& tablename, const QMap<QString, QString>& updates, const ConditionNode & conditions) {
     try {
         for (auto& table : m_tables) {
             if (table.name().toLower() == tablename.toLower()) {
@@ -104,7 +104,7 @@ int xhydatabase::updateData(const QString& tablename, const QMap<QString, QStrin
     }
 }
 
-int xhydatabase::deleteData(const QString& tablename, const QMap<QString, QString>& conditions) {
+int xhydatabase::deleteData(const QString& tablename, const ConditionNode & conditions) {
     try {
         for (auto& table : m_tables) {
             if (table.name().toLower() == tablename.toLower()) {
@@ -119,7 +119,7 @@ int xhydatabase::deleteData(const QString& tablename, const QMap<QString, QStrin
     }
 }
 
-bool xhydatabase::selectData(const QString& tablename, const QMap<QString, QString>& conditions, QVector<xhyrecord>& results) {
+bool xhydatabase::selectData(const QString& tablename, const ConditionNode& conditions, QVector<xhyrecord>& results) {
     try {
         for (auto& table : m_tables) {
             if (table.name().toLower() == tablename.toLower()) {

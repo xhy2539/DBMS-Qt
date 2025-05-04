@@ -1,5 +1,6 @@
 DBMS_autogen/timestamp: \
 	G:/C++/DBMS/CMakeLists.txt \
+	G:/C++/DBMS/ConditionNode.h \
 	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/.qtc/package-manager/auto-setup.cmake \
 	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/CMakeFiles/3.29.3/CMakeCXXCompiler.cmake \
 	G:/C++/DBMS/build/Desktop_Qt_6_7_2_MinGW_64_bit-Debug/CMakeFiles/3.29.3/CMakeRCCompiler.cmake \

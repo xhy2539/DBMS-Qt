@@ -28,8 +28,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         xhydbmanager.h xhydbmanager.cpp
         xhydatabase.h xhydatabase.cpp
         sqlparser.h sqlparser.cpp
-
         xhyrecord.h xhyrecord.cpp
+        ConditionNode.h
 
     )
 # Define target properties for Android with Qt 6 as:

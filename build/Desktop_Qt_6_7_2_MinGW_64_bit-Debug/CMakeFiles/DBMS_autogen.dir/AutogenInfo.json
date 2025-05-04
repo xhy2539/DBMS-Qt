@@ -297,6 +297,12 @@
 	"HEADERS" : 
 	[
 		[
+			"G:/C++/DBMS/ConditionNode.h",
+			"MU",
+			"EWIEGA46WW/moc_ConditionNode.cpp",
+			null
+		],
+		[
 			"G:/C++/DBMS/mainwindow.h",
 			"MU",
 			"EWIEGA46WW/moc_mainwindow.cpp",

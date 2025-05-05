@@ -118,8 +118,19 @@ bool xhydbmanager::beginTransaction() {
     return true;
 }
 bool xhydbmanager::commitTransaction() {
-    if (!m_inTransaction) return false; // 如果不在事务中，则返回失败
-    m_inTransaction = false; // 更新事务状态
+    if (!m_inTransaction) return false;
+
+    // 保存当前数据库的所有表到文件
+    if (!current_database.isEmpty()) {
+        xhydatabase* db = find_database(current_database);
+        if (db) {
+            for (const xhytable& table : db->tables()) {
+                save_table_to_file(current_database, table.name(), &table);
+            }
+        }
+    }
+
+    m_inTransaction = false;
     qDebug() << "Transaction committed for database:" << current_database;
     return true;
 }
@@ -676,7 +687,6 @@ void xhydbmanager::save_table_records_file(const QString& filePath, const xhytab
 
     file.close();
 }
-
 // 3. 保存完整性约束文件
 void xhydbmanager::save_table_integrity_file(const QString& filePath, const xhytable* table) {
     QFile file(filePath);

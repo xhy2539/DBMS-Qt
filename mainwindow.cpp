@@ -676,7 +676,7 @@ void MainWindow::handleSelect(const QString& command) {
 
     // 解析WHERE条件
     ConditionNode conditionRoot;
-     ui->show->appendPlainText(where_part+"111");
+
 
         if (!parseWhereClause(where_part, conditionRoot)) {
             ui->show->appendPlainText("错误: WHERE 条件语法无效");

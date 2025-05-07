@@ -23,7 +23,8 @@ public:
     void beginTransaction();
     void commit();
     void rollback();
-
+    void clearTables();
+    void addTable(const xhytable& table);
     // 数据操作（增加异常抛出）
     bool insertData(const QString& tablename, const QMap<QString, QString>& fieldValues);
     int updateData(const QString& tablename,

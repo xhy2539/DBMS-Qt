@@ -12,6 +12,7 @@
 #include <QDir>
 #include"ConditionNode.h"
 class xhydbmanager {
+
 public:
     xhydbmanager();
 
@@ -77,6 +78,7 @@ public:
     bool commitTransaction();
     void rollbackTransaction();
     bool isInTransaction() const;
+    void addTable(const xhytable& table);
 
     // 数据操作
     bool insertData(const QString& dbname, const QString& tablename, const QMap<QString, QString>& fieldValues);
@@ -112,7 +114,7 @@ private:
     QList<xhydatabase> m_databases;
     QString current_database;
     bool m_inTransaction = false;
-
+    QList<xhytable> m_tempTables;
 };
 
 #endif // XHYDBMANAGER_H

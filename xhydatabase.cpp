@@ -134,3 +134,9 @@ bool xhydatabase::selectData(const QString& tablename, const ConditionNode& cond
         return false;
     }
 }
+void xhydatabase::clearTables() {
+    m_tables.clear(); // 清空所有表
+}
+void xhydatabase::addTable(const xhytable& table) {
+    m_tables.append(table); // 将表添加到数据库中
+}

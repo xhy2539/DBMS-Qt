@@ -5,6 +5,8 @@
 #include "sqlparser.h"
 #include "xhydbmanager.h"
 #include "ConditionNode.h"
+#include "userfilemanager.h"
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 using ConditionTree = QMap<QString, QString>;
@@ -19,7 +21,8 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    //修改构造函数传入用户名（用于查看权限）
+    explicit MainWindow(const QString &name, QWidget *parent = nullptr);
     ~MainWindow();
 
     xhydatabase *findDatabase(const QString &name);
@@ -61,9 +64,13 @@ private:
     /// 显示表结构
     void show_schema(const QString& db_name, const QString& table_name);
 
+
     Ui::MainWindow *ui;            ///< UI界面指针
     xhydbmanager db_manager;       ///< 数据库管理器实例
     SQLParser sqlParser;
     QString current_db;            ///< 当前选中的数据库名称
+    QString findDataFile(); //查找账号信息地址
+    QString username; //用户名用于检查权限
+    UserFileManager Account; //账号管理
 };
 #endif // MAINWINDOW_H

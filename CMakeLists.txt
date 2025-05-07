@@ -30,9 +30,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         sqlparser.h sqlparser.cpp
         xhyrecord.h xhyrecord.cpp
         ConditionNode.h
-        xhyindex.h
-        xhyindex.cpp
-
+        logindialog.h logindialog.cpp logindialog.ui
+        userfilemanager.h userfilemanager.cpp
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET DBMS APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR

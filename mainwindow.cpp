@@ -4,15 +4,12 @@
 #include <QRegularExpression>
 #include <QDebug>
 #include <QStack>
-
-MainWindow::MainWindow(const QString &name,QWidget *parent)
+MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow),
-    Account(findDataFile())//初始化账号管理文件
+    , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
     setWindowTitle("Mini DBMS");
-    username=name;//传入用户名
     db_manager.load_databases_from_files();
 }
 
@@ -45,23 +42,6 @@ void MainWindow::on_run_clicked()
     if(!remaining.isEmpty()) {
         ui->show->appendPlainText("错误: 检测到未完成的SQL语句（缺少分号）: " + remaining);
     }
-}
-QString MainWindow::findDataFile() {
-    QStringList possiblePaths = {
-        "data/default_userdata.dat",          // 开发环境
-        "../data/default_userdata.dat",       // 一级构建目录
-        "../../data/default_userdata.dat",    // 二级构建目录
-        "../../../data/default_userdata.dat"  // 三级构建目录
-    };
-
-    for (const QString &path : possiblePaths) {
-        if (QFile::exists(path)) {
-            qDebug() << "Found file at:" << QFileInfo(path).absoluteFilePath();
-            return path;
-        }
-    }
-    qWarning() << "File not found in any candidate paths";
-    return "";
 }
 
 void MainWindow::execute_command(QString& command)

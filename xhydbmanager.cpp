@@ -110,7 +110,6 @@ QList<xhydatabase> xhydbmanager::databases() const {
     return m_databases;
 }
 
-// 事务管理
 bool xhydbmanager::beginTransaction() {
     if (m_inTransaction) return false; // 如果已经在事务中，则返回失败
     m_inTransaction = true; // 更新事务状态
@@ -136,9 +135,21 @@ bool xhydbmanager::commitTransaction() {
 }
 
 void xhydbmanager::rollbackTransaction() {
-    if (!m_inTransaction) return; // 如果不在事务中，则不执行操作
-    m_inTransaction = false; // 更新事务状态
-    qDebug() << "Transaction rolled back for database:" << current_database;
+    if (m_inTransaction) {
+        // 恢复到事务开始前的状态
+        if (!current_database.isEmpty()) {
+            xhydatabase* db = find_database(current_database);
+            if (db) {
+                db->clearTables(); // 清空当前表数据
+                for (const auto& tempTable : m_tempTables) {
+                    db->addTable(tempTable); // 直接使用对象，而不是解引用
+                }
+            }
+        }
+        m_tempTables.clear(); // 清空临时表
+        m_inTransaction = false;
+        qDebug() << "Transaction rolled back for database:" << current_database;
+    }
 }
 bool xhydbmanager::add_column(const QString& database_name, const QString& table_name, const xhyfield& field) {
     xhydatabase* db = find_database(database_name);
@@ -302,21 +313,15 @@ QStringList parseConstraints(const QString& constraints) {
     return constraintList;
 }
 void xhydbmanager::commit() {
-    if (m_inTransaction && !current_database.isEmpty()) {
-        if (auto db = find_database(current_database)) {
-            db->commit();
-            m_inTransaction = false;
-
-            // 保存所有表
-            for (const auto& table : db->tables()) {
-                save_table_to_file(current_database, table.name(), &table);
-            }
-
-            qDebug() << "Transaction committed for database:" << current_database;
+    if (m_inTransaction) {
+        // 将临时表添加到数据库
+        for (const auto& table : m_tempTables) {
+            // 持久化表
         }
+        m_tempTables.clear(); // 清空临时表
+        m_inTransaction = false;
     }
 }
-
 
 
 bool xhydbmanager::update_table(const QString& database_name, const xhytable& table) {
@@ -340,12 +345,9 @@ bool xhydbmanager::update_table(const QString& database_name, const xhytable& ta
     return true; // 返回更新成功
 }
 void xhydbmanager::rollback() {
-    if (m_inTransaction && !current_database.isEmpty()) {
-        if (auto db = find_database(current_database)) {
-            db->rollback();
-            m_inTransaction = false;
-            qDebug() << "Transaction rolled back for database:" << current_database;
-        }
+    if (m_inTransaction) {
+        m_tempTables.clear(); // 清空临时表
+        m_inTransaction = false;
     }
 }
 
@@ -797,4 +799,9 @@ void xhydbmanager::save_table_to_file(const QString& dbname, const QString& tabl
     update_table_description_file(dbname, tablename, table);
 
     qDebug() << "表" << tablename << "已成功保存到文件";
+}
+void xhydbmanager::addTable(const xhytable& table) {
+    if (m_inTransaction) {
+        m_tempTables.append(table); // 存储临时表
+    }
 }

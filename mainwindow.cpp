@@ -4,12 +4,14 @@
 #include <QRegularExpression>
 #include <QDebug>
 #include <QStack>
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(const QString &name,QWidget *parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow)
+    , ui(new Ui::MainWindow),
+    Account(findDataFile())//初始化账号管理文件
 {
     ui->setupUi(this);
     setWindowTitle("Mini DBMS");
+    username=name;//传入用户名
     db_manager.load_databases_from_files();
 }
 
@@ -44,14 +46,38 @@ void MainWindow::on_run_clicked()
     }
 }
 
+QString MainWindow::findDataFile() {
+    QStringList possiblePaths = {
+        "data/default_userdata.dat",          // 开发环境
+        "../data/default_userdata.dat",       // 一级构建目录
+        "../../data/default_userdata.dat",    // 二级构建目录
+        "../../../data/default_userdata.dat"  // 三级构建目录
+    };
+
+    for (const QString &path : possiblePaths) {
+        if (QFile::exists(path)) {
+            qDebug() << "Found file at:" << QFileInfo(path).absoluteFilePath();
+            return path;
+        }
+    }
+    qWarning() << "File not found in any candidate paths";
+    return "";
+}
 void MainWindow::execute_command(QString& command)
 {
     if (command.isEmpty()) return;
 
     try {
         QString cmdUpper = command.toUpper();
-
-        if (cmdUpper.startsWith("CREATE DATABASE")) {
+        if (cmdUpper.startsWith("EXPLAIN SELECT")) {
+            handleExplainSelect(command);
+        } else if (cmdUpper.startsWith("CREATE INDEX") || cmdUpper.startsWith("CREATE UNIQUE INDEX")) {
+            handleCreateIndex(command);
+        } else if (cmdUpper.startsWith("DROP INDEX")) {
+            handleDropIndex(command);
+        } else if (cmdUpper.startsWith("SHOW INDEXES") || cmdUpper.startsWith("SELECT * FROM INDICES")) {
+            handleShowIndexes(command);
+        }else if (cmdUpper.startsWith("CREATE DATABASE")) {
             handleCreateDatabase(command);
         }
         else if (cmdUpper.startsWith("SHOW DATABASES")) {
@@ -1201,4 +1227,125 @@ void MainWindow::show_schema(const QString& db_name, const QString& table_name) 
         }
     }
     ui->show->appendPlainText(QString("数据库 '%1' 不存在").arg(db_name));
+}
+void MainWindow::handleCreateIndex(const QString& command) {
+    QRegularExpression re(R"(CREATE\s+(UNIQUE\s+)?INDEX\s+(\w+)\s+ON\s+(\w+)\s*\(([^)]+)\))", QRegularExpression::CaseInsensitiveOption);
+    auto match = re.match(command);
+    if (!match.hasMatch()) {
+        ui->show->appendPlainText("语法错误: CREATE [UNIQUE] INDEX index_name ON table_name (col1, col2, ...)");
+        return;
+    }
+    bool unique = !match.captured(1).isEmpty();
+    QString idxname = match.captured(2);
+    QString tablename = match.captured(3);
+    auto cols = match.captured(4).split(',', Qt::SkipEmptyParts);
+    for(auto &c : cols) c = c.trimmed();
+
+    auto* db = db_manager.find_database(db_manager.get_current_database());
+    if (!db) { ui->show->appendPlainText("未选择数据库"); return; }
+    if (!db->has_table(tablename)) { ui->show->appendPlainText("表不存在"); return; }
+
+    // 检查字段都存在
+    for(const auto &col : cols)
+        if (!db->find_table(tablename)->has_field(col))
+        { ui->show->appendPlainText("字段不存在: " + col); return; }
+
+    if(db->createIndex(xhyindex(idxname, tablename, cols, unique)))
+        ui->show->appendPlainText(QString("索引'%1'创建成功").arg(idxname));
+    else
+        ui->show->appendPlainText(QString("索引'%1'已存在").arg(idxname));
+}
+void MainWindow::handleDropIndex(const QString& command) {
+    QRegularExpression re(R"(DROP\s+INDEX\s+(\w+))", QRegularExpression::CaseInsensitiveOption);
+    auto match = re.match(command);
+    if(!match.hasMatch()){
+        ui->show->appendPlainText("语法错误: DROP INDEX index_name");
+        return;
+    }
+    auto idxname = match.captured(1);
+
+    auto* db = db_manager.find_database(db_manager.get_current_database());
+    if(!db){ ui->show->appendPlainText("未选择数据库"); return;}
+
+    if(db->dropIndex(idxname))
+        ui->show->appendPlainText(QString("索引'%1'已删除").arg(idxname));
+    else
+        ui->show->appendPlainText(QString("索引'%1'不存在").arg(idxname));
+}
+void MainWindow::handleShowIndexes(const QString&) {
+    auto* db = db_manager.find_database(db_manager.get_current_database());
+    if(!db){ ui->show->appendPlainText("未选择数据库"); return;}
+    auto indexes=db->allIndexes();
+    if(indexes.isEmpty()){ui->show->appendPlainText("没有索引");return;}
+    for(const auto&i:indexes){
+        ui->show->appendPlainText(
+            i.name()+" ON "+i.tableName()+" ("+i.columns().join(",")+")"+(i.isUnique()?" [UNIQUE]":"")
+            );
+    }
+}
+void MainWindow::handleExplainSelect(const QString& command) {
+    QRegularExpression re(R"(EXPLAIN\s+SELECT\s+\*\s+FROM\s+(\w+)\s+WHERE\s+(\w+)\s*=\s*'([^']+)')", QRegularExpression::CaseInsensitiveOption);
+    auto match = re.match(command);
+
+    if (!match.hasMatch()) {
+        ui->show->appendPlainText("语法错误: EXPLAIN SELECT * FROM table_name WHERE column1 = 'value';");
+        return;
+    }
+
+    QString tableName = match.captured(1);
+    QString columnName = match.captured(2);
+    QString value = match.captured(3);
+
+    auto* db = db_manager.find_database(db_manager.get_current_database());
+    if (!db) {
+        ui->show->appendPlainText("未选择数据库");
+        return;
+    }
+
+    // 检查表是否存在
+    xhytable* table = db->find_table(tableName);
+    if (!table) {
+        ui->show->appendPlainText("表不存在: " + tableName);
+        return;
+    }
+
+    // 查找索引
+    const xhyindex* index = db->findIndex(columnName);
+
+    if (index) {
+        ui->show->appendPlainText(QString("使用索引 '%1' 来优化查询。").arg(index->name()));
+    } else {
+        ui->show->appendPlainText("没有找到合适的索引，可能会导致全表扫描。");
+    }
+
+    // 构造条件节点，仅支持简单等值比较
+    ConditionNode cond;
+    cond.type = ConditionNode::COMPARISON;
+    cond.comparison[columnName] = "= " + value;
+
+    QVector<xhyrecord> results;
+
+    if (db_manager.selectData(db_manager.get_current_database(), tableName, cond, results)) {
+        // 输出字段名标题行
+        QString header;
+        for (const auto& field : table->fields()) {
+            header += field.name() + "\t";
+        }
+        ui->show->appendPlainText(header.trimmed());
+
+        // 输出每条记录所有字段
+        for (const auto& record : results) {
+            QString row;
+            for (const auto& field : table->fields()) {
+                row += record.value(field.name()) + "\t";
+            }
+            ui->show->appendPlainText(row.trimmed());
+        }
+
+        if(results.isEmpty())
+            ui->show->appendPlainText("(无符合条件的数据)");
+
+    } else {
+        ui->show->appendPlainText("执行查询时发生错误或无数据。");
+    }
 }

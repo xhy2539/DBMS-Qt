@@ -1,33 +1,22 @@
-#ifndef XHYINDEX_H
-#define XHYINDEX_H
+#pragma once
 #include <QString>
-#include <QMap>
-#include <QVector>
-#include <QPair>
-#include "xhyrecord.h"
+#include <QStringList>
 
 class xhyindex {
 public:
-    xhyindex(const QString& indexName, const QString& tableName);
+    xhyindex() = default;
+    xhyindex(const QString& name, const QString& table, const QStringList& columns, bool unique = false);
 
-    // 创建索引
-    bool createIndex(const QString& fieldList);
+    QString name() const;
+    QString tableName() const;
+    QStringList columns() const;
+    bool isUnique() const;
 
-    // 删除索引
-    void dropIndex();
-
-    // 显示索引信息
-    QString showIndex() const;
-
-    // 使用索引查找
-    QVector<xhyrecord> findWithIndex(const QString& value);
+    // 可扩展：序列化/反序列化到磁盘
 
 private:
-    QString m_indexName;       // 索引名称
-    QString m_tableName;       // 表名称
-    QMap<QString, QVector<int>> m_indexData; // 存储索引数据
-    QStringList m_fields;      // 存储索引字段
+    QString m_name;
+    QString m_tableName;
+    QStringList m_columns;
+    bool m_unique = false;
 };
-
-
-#endif // XHYINDEX_H

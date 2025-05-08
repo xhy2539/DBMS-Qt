@@ -140,3 +140,34 @@ void xhydatabase::clearTables() {
 void xhydatabase::addTable(const xhytable& table) {
     m_tables.append(table); // 将表添加到数据库中
 }
+bool xhydatabase::createIndex(const xhyindex& idx) {
+    for (const auto& i : m_indexes) {
+        if (i.name().toLower() == idx.name().toLower()) return false; // 已存在
+    }
+    m_indexes.append(idx);
+    // 可持久化到磁盘
+    return true;
+}
+
+bool xhydatabase::dropIndex(const QString& indexName) {
+    for (auto it = m_indexes.begin(); it != m_indexes.end(); ++it) {
+        if (it->name().toLower() == indexName.toLower()) {
+            it = m_indexes.erase(it);
+            // 可同步删除磁盘文件
+            return true;
+        }
+    }
+    return false;
+}
+
+const xhyindex* xhydatabase::findIndex(const QString& columnName) const {
+    for (const auto& index : m_indexes) {
+        if (index.columns().contains(columnName, Qt::CaseInsensitive)) {
+            return &index;
+        }
+    }
+    return nullptr;
+}
+QList<xhyindex> xhydatabase::allIndexes() const {
+    return m_indexes;
+}

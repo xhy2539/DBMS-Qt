@@ -46,6 +46,8 @@ public:
     QStringList parseConstraints(const QString& constraints);
     void handleTableConstraint(const QString &constraint_str, xhytable &table);
     void flattenConditionTree(const ConditionNode &node, ConditionNode &output);
+    void handleExplainSelect(const QString& command);
+
 private slots:
     /// 处理Run按钮点击事件
     void on_run_clicked();
@@ -70,5 +72,9 @@ private:
     QString findDataFile(); //查找账号信息地址
     QString username; //用户名用于检查权限
     UserFileManager Account; //账号管理
+
+    void handleCreateIndex(const QString& command);
+    void handleDropIndex(const QString& command);
+    void handleShowIndexes(const QString& command);
 };
 #endif // MAINWINDOW_H

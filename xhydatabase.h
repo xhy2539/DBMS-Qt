@@ -5,6 +5,7 @@
 #include <QList>
 #include "xhytable.h"
 #include"ConditionNode.h"
+#include"xhyindex.h"
 class xhydatabase {
 public:
     explicit xhydatabase(const QString& name);
@@ -13,7 +14,8 @@ public:
     QString name() const;
     QList<xhytable> tables() const;
     xhytable* find_table(const QString& tablename);
-       xhydatabase* find_database(const QString& dbname) const;
+    xhydatabase* find_database(const QString& dbname) const;
+    QList<xhyindex> m_indexes;
   bool has_table(const QString& table_name) const;
     // 表操作
     bool createtable(const xhytable& table);
@@ -35,6 +37,10 @@ public:
     bool selectData(const QString& tablename,
                     const ConditionNode &conditions,
                     QVector<xhyrecord>& results);
+    bool createIndex(const xhyindex& idx);
+    bool dropIndex(const QString& indexName);
+    QList<xhyindex> allIndexes() const;
+    const xhyindex* findIndex(const QString& columnName) const;
 
 private:
     QString m_name;

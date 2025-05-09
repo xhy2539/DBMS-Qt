@@ -39,12 +39,15 @@ public:
     void handleUpdate(const QString &command);
     void handleDelete(const QString &command);
     void handleSelect(const QString &command);
+    bool isColumnDefinition(const QString& def);//是否是字段
+    void parseAndAddField(const QString& fieldStr, xhytable& table);//添加字段
+    QStringList smartSplit(const QString& input);
 
     QStringList parseSqlValues(const QString &input);
     void handleAlterTable(const QString &command);
     xhyfield::datatype parseDataType(const QString& type_str, int* size = nullptr);
     QStringList parseConstraints(const QString& constraints);
-    void handleTableConstraint(const QString &constraint_str, xhytable &table);
+    void handleTableConstraint(const QString& constraint_str, xhytable& table);
     void flattenConditionTree(const ConditionNode &node, ConditionNode &output);
 private slots:
     /// 处理Run按钮点击事件

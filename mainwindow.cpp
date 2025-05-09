@@ -184,6 +184,75 @@ void MainWindow::handleDropDatabase(const QString& command) {
     }
 }
 
+// 智能拆分函数
+QStringList MainWindow::smartSplit(const QString& input) {
+    QStringList result;
+    int bracketLevel = 0;
+    QString current;
+
+    for (QChar ch : input) {
+        if (ch == '(') bracketLevel++;
+        else if (ch == ')') bracketLevel--;
+
+        if (ch == ',' && bracketLevel == 0) {
+            result.append(current.trimmed());
+            current.clear();
+        } else {
+            current.append(ch);
+        }
+    }
+
+    if (!current.isEmpty())
+        result.append(current.trimmed());
+
+    return result;
+}
+
+// 判断是否是列定义的简单示例
+bool MainWindow::isColumnDefinition(const QString& def) {
+    // 简单检查，比如看是否包含类型关键字
+    return !(def.contains("CONSTRAINT"))&&def.contains("INT") ||def.contains("int")|| def.contains("VARCHAR") ||def.contains("varchar")|| def.contains("FLOAT")||def.contains("float")||def.contains("BOOL")||def.contains("bool")||def.contains("DATE")||def.contains("date")||def.contains("CHAR")||def.contains("char"); // 可以扩展更多类型
+}
+
+// 解析并添加字段的示例实现
+void MainWindow::parseAndAddField(const QString& fieldStr, xhytable& table) {
+    QRegularExpression field_re(
+        R"((\w+)\s+(\w+)(?:\((\d+)\))?\s*(.*))",
+        QRegularExpression::CaseInsensitiveOption);
+
+    QRegularExpressionMatch field_match = field_re.match(fieldStr.trimmed());
+
+    if (!field_match.hasMatch()) {
+        ui->show->appendPlainText("错误: 列定义格式应为 <列名> <类型>[(长度)] [约束]");
+        return;
+    }
+
+    QString field_name = field_match.captured(1).trimmed();
+    QString type_str = field_match.captured(2).trimmed().toUpper();
+    QString size_str = field_match.captured(3).trimmed();
+    QString constraints_str = field_match.captured(4).trimmed();
+
+    // 强制 VARCHAR 必须指定长度
+    if (type_str == "VARCHAR") {
+        if (size_str.isEmpty()) {
+            ui->show->appendPlainText("错误: VARCHAR 类型必须指定长度，例如 VARCHAR(255)");
+            return;
+        }
+
+        bool ok;
+        int varchar_length = size_str.toInt(&ok);
+        if (!ok || varchar_length <= 0) {
+            ui->show->appendPlainText("错误: 无效的 VARCHAR 长度 '" + size_str + "'");
+            return;
+        }
+    }
+
+    // 解析其他数据类型，创建字段对象并添加到表中
+    xhyfield::datatype dataType = parseDataType(type_str); // 假设这个函数会返回合适的数据类型
+    xhyfield new_field(field_name, dataType, constraints_str.split(' ', Qt::SkipEmptyParts));
+
+    table.addfield(new_field);
+}
 // 表操作
 void MainWindow::handleCreateTable(QString& command) {
     QString processedCommand = command.replace(QRegularExpression("\\s+"), " ");
@@ -205,82 +274,19 @@ void MainWindow::handleCreateTable(QString& command) {
     }
 
     xhytable new_table(table_name);
-    QStringList fields = fields_str.split(',', Qt::SkipEmptyParts);
 
-    for (const auto& field_str : fields) {
-        QRegularExpression field_re(
-            R"((\w+)\s+(\w+)(?:\((\d+)\))?\s*(.*))", // 匹配字段名、类型、长度和约束
-            QRegularExpression::CaseInsensitiveOption
-            );
-        QRegularExpressionMatch field_match = field_re.match(field_str.trimmed());
+    // 使用智能拆分函数
+    QStringList definitions = smartSplit(fields_str);
 
-        if (!field_match.hasMatch()) {
-            ui->show->appendPlainText("错误: 列定义格式应为 <列名> <类型>[(长度)] [约束]");
-            return;
+    for (const auto& def : definitions) {
+        // 检查是否是字段定义或约束
+        if (isColumnDefinition(def)) {
+            // 解析并添加字段
+            parseAndAddField(def, new_table);
+        } else {
+            // 当作表级约束处理
+            handleTableConstraint(def.trimmed(), new_table);
         }
-
-        QString field_name = field_match.captured(1).trimmed();
-        QString type_str = field_match.captured(2).trimmed().toUpper();
-        QString size_str = field_match.captured(3).trimmed();
-        QString constraints_str = field_match.captured(4).trimmed();
-
-        // 处理 PRIMARY KEY 合并
-        QStringList constraints = constraints_str.split(' ', Qt::SkipEmptyParts);
-        for (int i = 0; i < constraints.size(); ++i) {
-            if (constraints[i].toUpper() == "PRIMARY" &&
-                i + 1 < constraints.size() &&
-                constraints[i+1].toUpper() == "KEY")
-            {
-                constraints[i] = "PRIMARY_KEY";
-                constraints.removeAt(i+1);
-            }
-        }
-
-        // 处理其他约束（如 NOT NULL）
-        for (int i = 0; i < constraints.size(); ++i) {
-            if (constraints[i].toUpper() == "NOT" &&
-                i + 1 < constraints.size() &&
-                constraints[i+1].toUpper() == "NULL")
-            {
-                constraints[i] = "NOT_NULL";
-                constraints.removeAt(i+1);
-            }
-        }
-
-        // 强制 VARCHAR 必须指定长度
-        if (type_str == "VARCHAR") {
-            if (size_str.isEmpty()) {
-                ui->show->appendPlainText("错误: VARCHAR 必须指定长度，例如 VARCHAR(255)");
-                return;
-            }
-            bool ok;
-            int varchar_length = size_str.toInt(&ok);
-            if (!ok || varchar_length <= 0) {
-                ui->show->appendPlainText("错误: 无效的 VARCHAR 长度 '" + size_str + "'");
-                return;
-            }
-            constraints.prepend("SIZE(" + size_str + ")");
-        }
-
-        // 解析字段类型
-        int size_val = 0;
-        xhyfield::datatype type = parseDataType(type_str, &size_val);
-
-        // 处理 CHAR 类型长度
-        if (type == xhyfield::CHAR && size_str.isEmpty()) {
-            ui->show->appendPlainText("错误: CHAR 类型必须指定长度，例如 CHAR(20)");
-            return;
-        }
-
-        // 创建字段对象
-        xhyfield new_field(field_name, type, constraints);
-
-        // 添加主键约束
-        if (constraints.contains("PRIMARY_KEY")) {
-            new_table.add_primary_key({field_name});
-        }
-
-        new_table.addfield(new_field);
     }
 
     if (db_manager.createtable(current_db, new_table)) {
@@ -290,37 +296,92 @@ void MainWindow::handleCreateTable(QString& command) {
     }
 }
 
+
+//处理约束
 void MainWindow::handleTableConstraint(const QString& constraint_str, xhytable& table) {
+    // 统一处理约束名称和类型的正则表达式
     QRegularExpression constraint_re(
-        "CONSTRAINT\\s+(\\w+)\\s+(PRIMARY\\s+KEY|FOREIGN\\s+KEY|UNIQUE|CHECK)\\s*\\(([^)]+)\\)",
+        "(?:CONSTRAINT\\s+(\\w+)\\s+)?(PRIMARY\\s+KEY|FOREIGN\\s+KEY|UNIQUE|CHECK|NOT\\s+NULL|DEFAULT)\\s*(?:\\(([^)]+)\\)|([^,]+))?",
         QRegularExpression::CaseInsensitiveOption);
 
     QRegularExpressionMatch match = constraint_re.match(constraint_str);
-    if (!match.hasMatch()) return;
+
+    if (!match.hasMatch()) {
+        qWarning() << "Invalid constraint syntax:" << constraint_str;
+        return;
+    }
 
     QString constr_name = match.captured(1);
-    QString constr_type = match.captured(2).toUpper();
-    QString constr_details = match.captured(3);
+    QString constr_type = match.captured(2).toUpper().simplified().replace(" ", "_");
+    QString constr_details = match.captured(3).trimmed();
 
-    if (constr_type == "PRIMARY KEY") {
-        table.add_primary_key(constr_details.split(',', Qt::SkipEmptyParts));
-    }
-    else if (constr_type == "FOREIGN KEY") {
-        QRegularExpression fk_re("(\\w+)\\s+REFERENCES\\s+(\\w+)\\s*\\((\\w+)\\)");
-        QRegularExpressionMatch fk_match = fk_re.match(constr_details);
-        if (fk_match.hasMatch()) {
+    try {
+        // 将所有原有逻辑移至此处，确保在这里处理每种约束类型
+        if (constr_type == "PRIMARY_KEY"||constr_type == "primary_key") {
+            if (constr_details.isEmpty()) {
+                throw std::runtime_error("Primary key constraint requires column list");
+            }
+            table.add_primary_key(constr_details.split(',', Qt::SkipEmptyParts), constr_name);
+        } else if (constr_type == "FOREIGN_KEY"||constr_type == "foreign_key") {
+            // 处理外键约束: FOREIGN KEY (col1) REFERENCES other_table(col2)
+            QRegularExpression fk_re(
+                "(\\w+)\\s+REFERENCES\\s+(\\w+)\\s*\\((\\w+)\\)(?:\\s+ON\\s+DELETE\\s+(RESTRICT|CASCADE|SET_NULL|SET_DEFAULT|NO_ACTION))?(?:\\s+ON\\s+UPDATE\\s+(RESTRICT|CASCADE|SET_NULL|SET_DEFAULT|NO_ACTION))?",
+                QRegularExpression::CaseInsensitiveOption);
+
+            QRegularExpressionMatch fk_match = fk_re.match(constr_details);
+            if (!fk_match.hasMatch()) {
+                throw std::runtime_error("Invalid foreign key syntax");
+            }
+            QString on_delete = fk_match.captured(4).isEmpty() ? "NO_ACTION" : fk_match.captured(4);
+            QString on_update = fk_match.captured(5).isEmpty() ? "NO_ACTION" : fk_match.captured(5);
+
             table.add_foreign_key(
                 fk_match.captured(1),  // 列名
                 fk_match.captured(2),  // 引用表
                 fk_match.captured(3),  // 引用列
-                constr_name);         // 约束名
+                constr_name,          // 约束名
+                on_delete,           // ON DELETE 动作
+                on_update            // ON UPDATE 动作
+                );
+        } else if (constr_type == "UNIQUE"||constr_type == "unique") {
+            if (constr_details.isEmpty()) {
+                throw std::runtime_error("Unique constraint requires column list");
+            }
+            table.add_unique_constraint(constr_details.split(',', Qt::SkipEmptyParts), constr_name);
+        } else if (constr_type == "CHECK"||constr_type == "check") {
+            if (constr_details.isEmpty()) {
+                throw std::runtime_error("Check constraint requires condition");
+            }
+            table.add_check_constraint(constr_details, constr_name);
+        } else if (constr_type == "NOT_NULL"||constr_type == "not_null") {
+            if (constr_details.isEmpty()) {
+                throw std::runtime_error("NOT NULL constraint requires column name");
+            }
+
+            // 假设 add_not_null_constraint 接受多个列名作为参数，我们需要逐个调用
+            QStringList columns = constr_details.split(',', Qt::SkipEmptyParts);
+
+            for (const QString& column : columns) {
+                table.add_not_null_constraint(column.trimmed(), constr_name);  // 假设 add_not_null_constraint 接受单个列名和约束名
+            }
+        } else if (constr_type == "DEFAULT"||constr_type == "default") {
+            // DEFAULT 约束可以是: column_name DEFAULT value 或者 DEFAULT(value)
+            QStringList parts = constr_details.split(' ', Qt::SkipEmptyParts);
+
+            if (parts.size() < 2) {
+                throw std::runtime_error("DEFAULT constraint requires column name and value");
+            }
+
+            QString column_name = parts[0];
+            QString default_value = parts.mid(1).join(' '); // 合并剩余部分作为默认值
+
+            table.add_default_constraint(column_name, default_value, constr_name);
+        } else {
+            throw std::runtime_error(QString("Unknown constraint type: %1").arg(constr_type).toStdString());
         }
-    }
-    else if (constr_type == "UNIQUE") {
-        table.add_unique_constraint(constr_details.split(',', Qt::SkipEmptyParts), constr_name);
-    }
-    else if (constr_type == "CHECK") {
-        table.add_check_constraint(constr_details, constr_name);
+    } catch (const std::exception& e) {
+        qCritical() << "Constraint processing error:" << e.what() << "in:" << constraint_str;
+        throw;
     }
 }
 
@@ -435,26 +496,23 @@ void MainWindow::handleInsert(const QString& command) {
 
             // 构建字段-值映射
             QMap<QString, QString> fieldValues;
+            // 如果没有指定字段，使用表的所有字段
+            xhydatabase* db = db_manager.find_database(current_db);
+            xhytable* table = db->find_table(table_name);
             if (fields.isEmpty()) {
-                // 如果没有指定字段，使用表的所有字段
-                xhydatabase* db = db_manager.find_database(current_db);
                 if (!db) {
                     ui->show->appendPlainText("错误: 数据库不存在");
                     return;
                 }
-
-                xhytable* table = db->find_table(table_name);
                 if (!table) {
                     ui->show->appendPlainText(QString("错误: 表 '%1' 不存在").arg(table_name));
                     return;
                 }
-
                 auto tableFields = table->fields();
                 if (tableFields.size() != values.size()) {
                     ui->show->appendPlainText("错误: 值数与表列数不匹配");
                     continue;
                 }
-
                 for (int i = 0; i < tableFields.size(); ++i) {
                     fieldValues[tableFields[i].name()] = values[i];
                 }
@@ -463,7 +521,16 @@ void MainWindow::handleInsert(const QString& command) {
                     fieldValues[fields[i]] = values[i];
                 }
             }
-
+            if(!table->validateRecord(fieldValues)){
+                ui->show->appendPlainText("错误: 数据类型不匹配");
+                return;
+            }
+            if(!table->checkInsertConstraints(fieldValues)){
+                {
+                    ui->show->appendPlainText("错误: 违反约束条件");
+                    return;
+                }
+            }
             // 执行插入
             if (db_manager.insertData(current_db, table_name, fieldValues)) {
                 total_inserted++;

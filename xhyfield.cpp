@@ -35,6 +35,7 @@ QString xhyfield::typestring() const {
     case FLOAT: return "FLOAT";
     case DATE: return "DATE";
     case BOOL: return "BOOL";
+    case TEXT: return "TEXT";
     case CHAR: {
         for(const QString& c : m_constraints) {
             if(c.startsWith("SIZE(")) {

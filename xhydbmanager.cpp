@@ -72,25 +72,35 @@ bool xhydbmanager::createdatabase(const QString& dbname) {
 
 bool xhydbmanager::dropdatabase(const QString& dbname) {
     for (auto it = m_databases.begin(); it != m_databases.end(); ++it) {
-        if (it->name().toLower() == dbname.toLower()) {
+        if (it->name().compare(dbname, Qt::CaseInsensitive) == 0) { // 使用 compare 进行不区分大小写的比较
             // 删除数据库目录
-            QString dbPath = QString("%1/data/%2").arg(m_dataDir, dbname);
-              QDir db_dir(dbPath);
+            QString dbPath = QString("%1/data/%2").arg(m_dataDir, dbname); // m_dataDir 是您的根数据目录
+            QDir db_dir(dbPath);
             if (db_dir.exists()) {
-                db_dir.removeRecursively();
+                if (!db_dir.removeRecursively()) { // 检查删除是否成功
+                    qWarning() << "错误: 无法完全删除数据库目录: " << dbPath;
+                    return false; // 如果目录删除失败，操作也失败
+                }
             }
 
-            m_databases.erase(it);
-            if (current_database.toLower() == dbname.toLower()) {
+            // 从内存列表中移除
+            it = m_databases.erase(it); // erase 返回下一个有效迭代器
+
+            if (current_database.compare(dbname, Qt::CaseInsensitive) == 0) {
                 current_database.clear();
             }
-            qDebug() << "Database dropped:" << dbname;
+            qDebug() << "数据库已删除 (包括内存记录):" << dbname;
+
+            // TODO: 更新 ruanko.db (如果它跟踪所有数据库的元数据)
+            // 这部分逻辑比较复杂，需要读取 ruanko.db，移除对应的 DatabaseBlock，然后重写文件。
+            // 或者标记为已删除。暂时跳过这一步，但这是持久化所必需的。
+
             return true;
         }
     }
+    qWarning() << "错误: 尝试删除的数据库 '" << dbname << "' 在内存中未找到。";
     return false;
 }
-
 bool xhydbmanager::use_database(const QString& dbname) {
     for (const auto& db : m_databases) {
         if (db.name().toLower() == dbname.toLower()) {

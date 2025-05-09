@@ -23,7 +23,11 @@ QString xhyfield::checkConstraint() const {
 bool xhyfield::hasCheck() const {
     return !checkConstraint().isEmpty();
 }
-
+void xhyfield::set_enum_values(const QList<QString>& values) {
+    this->m_enumValues = values;
+    // 您可以在这里添加一些调试信息，例如：
+    // qDebug() << "Enum values for field" << m_name << "set to:" << m_enumValues;
+}
 QString xhyfield::typestring() const {
     switch(m_type) {
     case INT: return "INT";

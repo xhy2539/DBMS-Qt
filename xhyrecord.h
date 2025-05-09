@@ -11,10 +11,6 @@ public:
     void insert(const QString& field, const QString& value);
     QMap<QString, QString> allValues() const; // 新增
     void clear();                             // 新增
-    //重载比较函数
-    bool operator!=(const xhyrecord& other) const {
-        return this->m_data != other.m_data;
-    }
 
 private:
     QMap<QString, QString> m_data;

@@ -37,13 +37,18 @@ public:
     void handleCreateIndex(const QString& command);
     void handleDropIndex(const QString& command);
     void handleShowIndexes(const QString& command);
+    bool isColumnDefinition(const QString& def);//是否是字段
+    void parseAndAddField(const QString& fieldStr, xhytable& table);//添加字段
+    QStringList smartSplit(const QString& input);
 
     QStringList parseSqlValues(const QString &input);
     xhyfield::datatype parseDataType(const QString& type_str, int* size = nullptr);
-    QStringList parseConstraints(const QString& constraints_str_input); // 参数名修改
-    void handleTableConstraint(const QString &constraint_str, xhytable &table);
 
+    QStringList parseConstraints(const QString& constraints_str_input); // 参数名修改
     QPair<int, QString> findLowestPrecedenceOperator(const QString &expr, const QStringList &operatorsInPrecedenceOrder);
+    void handleTableConstraint(const QString& constraint_str, xhytable& table);
+    void flattenConditionTree(const ConditionNode &node, ConditionNode &output);
+
 private slots:
     void on_run_clicked();
 

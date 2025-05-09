@@ -17,14 +17,28 @@ void xhytable::addfield(const xhyfield& field) {
         return;
     }
     xhyfield newField = field;
-    // 确保 setOrder 是 xhyfield 的 public 方法或在构造时设置
-    // newField.setOrder(m_fields.size() + 1);
-    if(field.constraints().contains("PRIMARY_KEY", Qt::CaseInsensitive)) {
-        if (!m_primaryKeys.contains(field.name(), Qt::CaseInsensitive)) {
-            m_primaryKeys.append(field.name());
-        }
+    newField.setOrder(m_fields.size() + 1);
+    // 解析主键约束
+    if(field.constraints().contains("PRIMARY_KEY")||field.constraints().contains("primary")) {
+        m_primaryKeys.append(field.name());
     }
-    m_fields.append(newField);
+    //解析非空约束
+    if(field.constraints().contains("NOT_NULL")||field.constraints().contains("null")) {
+            m_notNullFields.insert(field.name());
+        }
+    //解析unique
+    if(field.constraints().contains("UNIQUE")||field.constraints().contains("unique")) {
+        //如果已有，不做操作
+            if(m_uniqueConstraints.contains(field.name()));
+            else {
+                //否则加入
+                QList<QString> temp;
+                temp.append(field.name());
+                m_uniqueConstraints[field.name()]=temp;
+            }
+    }
+    m_fields.append(field);
+    rebuildIndexes();
 }
 
 bool xhytable::has_field(const QString& field_name) const {
@@ -156,17 +170,11 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValues) {
         validateRecord(fieldValues);
         xhyrecord new_record;
         for(const xhyfield& field : m_fields) {
-            QString value = fieldValues.value(field.name());
-            if (value.compare("NULL", Qt::CaseInsensitive) == 0 && !field.constraints().contains("NOT_NULL", Qt::CaseInsensitive)) {
-                new_record.insert(field.name(), QString());
-            } else {
-                new_record.insert(field.name(), value);
-            }
-        }
-        if (m_inTransaction) { // 现在 m_inTransaction 是成员变量
-            m_tempRecords.append(new_record);
-        } else {
-            m_records.append(new_record);
+            QString value = fieldValues.value(field.name(), "");
+            //如果为空且有默认值
+            if(value==""&&m_defaultValues.find(field.name())!=m_defaultValues.end())
+                value=m_defaultValues[field.name()];//设置默认值
+            new_record.insert(field.name(), value);
         }
         return true;
     } catch(const std::runtime_error& e) {
@@ -234,55 +242,134 @@ bool xhytable::selectData(const ConditionNode & conditions, QVector<xhyrecord>& 
     }
     return true;
 }
-
-void xhytable::validateRecord(const QMap<QString, QString>& values) const {
-    for(const xhyfield& field : m_fields) {
-        QString valueToValidate = values.value(field.name());
-        bool isExplicitNull = values.contains(field.name()) && valueToValidate.compare("NULL", Qt::CaseInsensitive) == 0;
-        bool isMissingAndNotNull = !values.contains(field.name()) && field.constraints().contains("NOT_NULL", Qt::CaseInsensitive);
-
-        if (field.constraints().contains("NOT_NULL", Qt::CaseInsensitive)) {
-            if(isExplicitNull || isMissingAndNotNull || (values.contains(field.name()) && valueToValidate.isEmpty() && !isExplicitNull) ){ // "" 也视为不满足NOT NULL
-                if (isExplicitNull || isMissingAndNotNull || valueToValidate.isEmpty()){
-                    throw std::runtime_error("字段 '" + field.name().toStdString() + "' (NOT NULL) 不能为 NULL 或空。");
-                }
-            }
-        }
-        if (!isExplicitNull && values.contains(field.name()) && !valueToValidate.isEmpty()) {
-            if (!validateType(field.type(), valueToValidate, field.constraints())) {
-                throw std::runtime_error("字段 '" + field.name().toStdString() + "' 的值 '" + valueToValidate.toStdString() + "' 类型错误或不符合长度/格式约束。");
-            }
-            if (field.hasCheck() && !checkConstraint(field, valueToValidate)) {
-                throw std::runtime_error("字段 '" + field.name().toStdString() + "' 的值 '" + valueToValidate.toStdString() + "' 违反了 CHECK 约束: " + field.checkConstraint().toStdString());
-            }
-        }
-    }
-    if(!m_primaryKeys.isEmpty()){
-        QMap<QString, QString> pkValuesInNewRecord;
-        for(const QString& pkField : m_primaryKeys){
-            if(!values.contains(pkField) || values.value(pkField).compare("NULL", Qt::CaseInsensitive) == 0 || values.value(pkField).isEmpty()){
-                throw std::runtime_error("主键字段 '" + pkField.toStdString() + "' 缺失、为NULL或为空。");
-            }
-            pkValuesInNewRecord[pkField] = values.value(pkField);
-        }
-        const QList<xhyrecord>& recordsToCheck = m_inTransaction ? m_tempRecords : m_records;
-        for(const auto& existingRecord : recordsToCheck){
-            // 如果正在更新记录，则跳过与自身比较主键（假设有一个方法可以识别是否是同一记录的更新）
-            // 简单起见，这里总是检查，对于INSERT是正确的。对于UPDATE，如果记录ID已知，可以排除自身。
+// 检查插入操作时是否违反约束
+bool xhytable::checkInsertConstraints(const QMap<QString, QString>& fieldValues) const {
+    // 验证主键唯一性
+    if (!m_primaryKeys.isEmpty()) {
+        for (const auto& record : m_records) {
             bool conflict = true;
-            for(const QString& pkField : m_primaryKeys){
-                if(existingRecord.value(pkField).compare(pkValuesInNewRecord.value(pkField), Qt::CaseSensitive) != 0){
+            for (const auto& pk : m_primaryKeys) {
+                if (record.value(pk) != fieldValues.value(pk)) {
                     conflict = false;
                     break;
                 }
             }
-            if(conflict){
-                QString pkValStr;
-                for(const QString& pkField : m_primaryKeys) pkValStr += pkField + "=" + pkValuesInNewRecord.value(pkField) + " ";
-                throw std::runtime_error("主键冲突: " + pkValStr.trimmed().toStdString());
+            //如果都一样
+            if (conflict) {
+                qWarning() << "插入失败: 主键冲突";
+                return false; // 主键冲突
             }
         }
     }
+
+    // 验证 NOT NULL 约束
+    for (const QString& field : m_notNullFields) {
+        if (!fieldValues.contains(field)) {
+            qWarning() << "插入失败: 缺少必填字段" << field;
+            return false; // 缺少必填字段
+        }
+    }
+
+    // 验证唯一性约束
+    for (const auto& uniqueConstraint : m_uniqueConstraints) {
+        const QList<QString>& uniqueFields = uniqueConstraint;
+        QMap<QString, QString> values;
+
+        for (const QString& field : uniqueFields) {
+            values[field] = fieldValues.value(field);
+        }
+
+        for (const auto& record : m_records) {
+            bool conflict = true;
+            for (const QString& field : uniqueFields) {
+                if (record.value(field) != values[field]) {
+                    conflict = false;
+                    break;
+                }
+            }
+            if (conflict) {
+                qWarning() << "插入失败: 唯一性约束违反，字段" << uniqueFields.join(", ");
+                return false; // 唯一性冲突
+            }
+        }
+    }
+
+    return true; // 所有约束通过
+}
+// 检查更新操作时是否违反约束
+bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const {
+    for (auto &record : m_records) {
+        if(matchConditions(record, conditions)) {
+
+            // 验证唯一性约束
+            for (const auto& uniqueConstraint : m_uniqueConstraints.keys()) {
+                const QList<QString>& uniqueFields = m_uniqueConstraints[uniqueConstraint];
+
+                QMap<QString, QString> updatedValues;
+
+                for (const QString& field : uniqueFields) {
+                    updatedValues[field] = updates.value(field, record.value(field));
+                }
+
+                bool uniqueConflict = false;
+
+                for (const auto& existingRecord : m_records) {
+                    bool conflict = true;
+
+                    for (const QString& field : uniqueFields) {
+                        if(existingRecord != record && existingRecord.value(field) == updatedValues[field]) {
+                            conflict = false;
+                            break;
+                        }
+                    }
+
+                    if(conflict){
+                        uniqueConflict = true;
+                        break;
+                    }
+                }
+
+                if(uniqueConflict){
+                    qWarning() << "更新失败: 唯一性约束违反，字段" << uniqueFields.join(", ");
+                    return false; // 唯一性冲突
+                }
+            }
+
+            // 验证 NOT NULL 约束
+            for (const QString& field : m_notNullFields) {
+                if(updates.contains(field)) {
+                    if(updates[field].isEmpty()) {
+                        qWarning() << "更新失败: 字段" << field << "不能为空";
+                        return false; // 非空限制违规
+                    }
+                } else {
+                    if(record.value(field).isEmpty()) {
+                        qWarning() << "更新失败: 字段" << field << "不能为空";
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true; // 所有约束通过
+}
+
+// 检查删除操作时是否违反外键约束
+bool xhytable::checkDeleteConstraints(const ConditionNode & conditions) const{
+    return true;
+}
+
+// 类型检查
+bool xhytable::validateRecord(const QMap<QString, QString>& values) const {
+    // 类型检查
+    for(const xhyfield& field : m_fields) {
+        const QString val = values.value(field.name());
+        if(!val.isEmpty() && !validateType(field.type(), val, field.constraints())) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool xhytable::validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const {
@@ -321,10 +408,6 @@ bool xhytable::validateType(xhyfield::datatype type, const QString& value, const
     }
 }
 
-bool xhytable::checkConstraint(const xhyfield& field, const QString& value) const {
-    Q_UNUSED(field); Q_UNUSED(value);
-    return true;
-}
 
 void xhytable::rebuildIndexes() { /* 占位符 */ }
 QVariant xhytable::convertToTypedValue(const QString& strValue, xhyfield::datatype type) const {
@@ -534,29 +617,66 @@ bool xhytable::compareQVariants(const QVariant& left, const QVariant& right, con
     return false;
 }
 
+// 添加主键
+void xhytable::add_primary_key(const QStringList& columns, const QString& constraint_name) {
+    for (const QString& column : columns) {
+        QString trimmedColumn = column.trimmed(); // 去除多余空格
 
-// matchConditions 函数保持您提供的版本（已移除 isNegated 相关逻辑）
-bool xhytable::matchConditions(const xhyrecord& record, const ConditionNode& condition) const {
-    bool result;
-    switch (condition.type) {
-    case ConditionNode::EMPTY:
-        return true;
-    case ConditionNode::LOGIC_OP:
-        if (condition.children.isEmpty()) {
-            return condition.logicOp.compare("AND", Qt::CaseInsensitive) == 0;
-        }
-        if (condition.logicOp.compare("AND", Qt::CaseInsensitive) == 0) {
-            result = true;
-            for (const auto& child : condition.children) {
-                if (!matchConditions(record, child)) { result = false; break; }
-            }
-        } else if (condition.logicOp.compare("OR", Qt::CaseInsensitive) == 0) {
-            result = false;
-            for (const auto& child : condition.children) {
-                if (matchConditions(record, child)) { result = true; break; }
-            }
+        if (!trimmedColumn.isEmpty()) {
+            m_primaryKeys.append(trimmedColumn); // 添加到主键列表
         } else {
-            throw std::runtime_error("未知逻辑运算符: " + condition.logicOp.toStdString());
+            qWarning() << "Warning: Primary key column name is empty, not added.";
+        }
+    }
+    if (!constraint_name.isEmpty()) {
+        qDebug() << "Primary key constraint name set to:" << constraint_name;
+    } else {
+        qDebug() << "No primary key constraint name specified.";
+    }
+
+    // 输出当前主键列表（调试用）
+    qDebug() << "Current primary key field list:" << m_primaryKeys;
+}
+
+// 添加外键
+void xhytable::add_foreign_key(const QString& column, const QString& referenceTable, const QString& referenceColumn, const QString& constraintName) {
+    QMap<QString, QString> foreignKey;
+    foreignKey["column"] = column;
+    foreignKey["referenceTable"] = referenceTable;
+    foreignKey["referenceColumn"] = referenceColumn;
+    foreignKey["constraintName"] = constraintName;
+
+    m_foreignKeys.append(foreignKey);
+}
+
+// 添加唯一约束
+void xhytable::add_unique_constraint(const QList<QString>& keys, const QString& constraintName) {
+    if (!m_uniqueConstraints.contains(constraintName)) {
+        m_uniqueConstraints[constraintName] = keys;
+    }
+    else qDebug()<<"约束名已被占用";
+}
+
+// 添加检查约束
+void xhytable::add_check_constraint(const QString& checkExpression, const QString& constraintName) {
+    m_checkConstraints[constraintName] = checkExpression;
+}
+// 事务支持
+void xhytable::beginTransaction() {
+    m_tempRecords = m_records;
+}
+
+void xhytable::commit() {
+    m_tempRecords.clear();
+}
+
+void xhytable::rollback() {
+    m_records = m_tempRecords;
+}
+xhyfield::datatype xhytable::getFieldType(const QString& fieldName) const {
+    for (const auto& field : m_fields) {
+        if (field.name() == fieldName) {
+            return field.type();
         }
         break;
     case ConditionNode::NEGATION_OP:
@@ -614,4 +734,32 @@ bool xhytable::matchConditions(const xhyrecord& record, const ConditionNode& con
         throw std::runtime_error("未知的条件节点类型");
     }
     return result;
+}
+void xhytable::add_foreign_key(const QString& column, const QString& ref_table,
+                               const QString& ref_column, const QString& constraint_name,
+                               const QString& on_delete, const QString& on_update) {
+    QMap<QString, QString> foreignKey;
+    foreignKey["column"] = column;
+    foreignKey["referenceTable"] = ref_table;
+    foreignKey["referenceColumn"] = ref_column;
+    foreignKey["constraintName"] = constraint_name;
+    foreignKey["onDelete"] = on_delete;
+    foreignKey["onUpdate"] = on_update;
+
+    m_foreignKeys.append(foreignKey);
+}
+
+void xhytable::add_not_null_constraint(const QString& column, const QString& constraint_name) {
+    if (!has_field(column)) {
+        throw std::runtime_error(QString("非空字段 '%1' 不存在").arg(column).toStdString());
+    }
+    m_notNullFields.insert(column);
+}
+
+void xhytable::add_default_constraint(const QString& column, const QString& default_value,
+                                      const QString& constraint_name) {
+    if (!has_field(column)) {
+        throw std::runtime_error(QString("默认值字段 '%1' 不存在").arg(column).toStdString());
+    }
+    m_defaultValues[column] = default_value;
 }

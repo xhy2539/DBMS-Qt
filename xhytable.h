@@ -47,7 +47,7 @@ public:
     bool matchConditions(const xhyrecord &record, const ConditionNode &condition) const;
 
 private:
-    void validateRecord(const QMap<QString, QString>& values) const;
+    void validateRecord(const QMap<QString, QString>& values, const xhyrecord* original_record_for_update = nullptr) const;
     bool validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const;
     bool checkConstraint(const xhyfield& field, const QString& value) const;
     void rebuildIndexes();

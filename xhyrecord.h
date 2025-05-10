@@ -11,6 +11,7 @@ public:
     void insert(const QString& field, const QString& value);
     QMap<QString, QString> allValues() const; // 新增
     void clear();                             // 新增
+    bool hasField(const QString& field) const; // 新增
 
 private:
     QMap<QString, QString> m_data;

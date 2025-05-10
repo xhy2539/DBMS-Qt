@@ -19,7 +19,6 @@
 #include <stdexcept> // 包含 stdexcept
 #include <limits>    // 用于 std::numeric_limits
 #include <QRegularExpressionMatchIterator>
-#include "tableshow.h"
 
 
 MainWindow::MainWindow(const QString &name,QWidget *parent)
@@ -34,41 +33,6 @@ MainWindow::MainWindow(const QString &name,QWidget *parent)
         qWarning() << "警告：用户数据加载/初始化失败。";
     }
     db_manager.load_databases_from_files();
-
-    //GUI
-    ui->linkButton->setEnabled(false);
-    ui->tableButton->setEnabled(false);
-
-    ui->tabWidget->setStyleSheet("QTabWidget::pane { margin: 0px; border: 0px; }");
-    tablelist = new tableList();
-    viewlist = new viewList();
-    functionlist = new functionList();
-    querylist = new queryList();
-    ui->tabWidget->addTab(tablelist,"对象");
-
-    tabBar = ui->tabWidget->tabBar();
-
-    // 隐藏第一个标签页的关闭按钮（索引为 0）
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-
-    dataSearch();
-    buildTree();
-    // popup = new popupWidget(ui->tabWidget);
-
-    // QHBoxLayout *layout = new QHBoxLayout(ui->widget);
-    // QListWidget *list = new QListWidget(ui->widget);
-    // layout->addWidget(list);
-    // ui->widget->setFixedHeight(ui->tabWidget->height()*2);
-    // ui->widget->raise();
-    // popup->showPopup();
-    connect(ui->treeWidget, &QTreeWidget::itemClicked, this, &MainWindow::handleItemClicked);
-    connect(ui->treeWidget, &QTreeWidget::itemDoubleClicked, this, &MainWindow::handleItemDoubleClicked);
 }
 
 MainWindow::~MainWindow()
@@ -100,6 +64,52 @@ QString MainWindow::findDataFile() {
     QString defaultPath = appDataDir.filePath("DBMSData/default_userdata.dat");
     qDebug() << "Using default user data file path:" << defaultPath;
     return defaultPath;
+}
+
+
+void MainWindow::on_run_clicked()
+{
+    QString input = ui->putin->toPlainText();
+    QStringList commands = SQLParser::parseMultiLineSQL(input); // SQLParser::静态调用
+
+    ui->show->clear();
+
+    for (const QString& command_const : commands) {
+        QString trimmedCmd = command_const.trimmed();
+        if (!trimmedCmd.isEmpty() && trimmedCmd.endsWith(';')) {
+            ui->show->appendPlainText("> " + trimmedCmd);
+            execute_command(trimmedCmd);
+            ui->show->appendPlainText("");
+        } else if (!trimmedCmd.isEmpty()){
+            ui->show->appendPlainText("! 忽略未以分号结尾的语句: " + trimmedCmd);
+        }
+    }
+    QString remaining = input.trimmed().section(';', -1).trimmed();
+    if(!remaining.isEmpty()) {
+        bool alreadyProcessedOrEmpty = commands.isEmpty();
+        if (!commands.isEmpty()) {
+            QString lastProcessedCmdFull = commands.last().trimmed();
+            QString lastProcessedCmdNoSemi = lastProcessedCmdFull;
+            if (lastProcessedCmdNoSemi.endsWith(';')) {
+                lastProcessedCmdNoSemi.chop(1);
+            }
+            if (lastProcessedCmdNoSemi == remaining || lastProcessedCmdFull == remaining) {
+                alreadyProcessedOrEmpty = true;
+            }
+        }
+        if (!alreadyProcessedOrEmpty) {
+            bool isPartOfProcessed = false;
+            for(const QString& cmd : commands) {
+                if (cmd.trimmed() == remaining + ";" || cmd.trimmed() == remaining) {
+                    isPartOfProcessed = true;
+                    break;
+                }
+            }
+            if (!isPartOfProcessed) {
+                ui->show->appendPlainText("错误: 检测到未完成的SQL语句（末尾缺少分号）: " + remaining);
+            }
+        }
+    }
 }
 
 void MainWindow::execute_command(const QString& command)
@@ -161,24 +171,24 @@ void MainWindow::execute_command(const QString& command)
         }
         else if (cmdUpper.startsWith("BEGIN TRANSACTION") || cmdUpper.startsWith("BEGIN")) {
             if (db_manager.beginTransaction()) {
-                current_query->appendPlainText("事务开始。");
+                ui->show->appendPlainText("事务开始。");
             } else {
-                current_query->appendPlainText("错误: 无法开始事务 (可能已在事务中或当前数据库不支持)。");
+                ui->show->appendPlainText("错误: 无法开始事务 (可能已在事务中或当前数据库不支持)。");
             }
         }
         else if (cmdUpper.startsWith("COMMIT")) {
             if (db_manager.commitTransaction()) {
-                current_query->appendPlainText("事务提交成功。");
+                ui->show->appendPlainText("事务提交成功。");
             } else {
-                current_query->appendPlainText("错误: 事务提交失败 (可能不在事务中或没有更改)。");
+                ui->show->appendPlainText("错误: 事务提交失败 (可能不在事务中或没有更改)。");
             }
         }
         else if (cmdUpper.startsWith("ROLLBACK")) {
             db_manager.rollbackTransaction();
-            current_query->appendPlainText("事务已回滚 (如果存在活动事务)。");
+            ui->show->appendPlainText("事务已回滚 (如果存在活动事务)。");
         }
         else {
-            current_query->appendPlainText("无法识别的命令: " + command);
+            ui->show->appendPlainText("无法识别的命令: " + command);
         }
     } catch (const std::runtime_error& e) {
         QString errMsg = "运行时错误: " + QString::fromStdString(e.what());
@@ -186,14 +196,14 @@ void MainWindow::execute_command(const QString& command)
             db_manager.rollbackTransaction();
             errMsg += " (事务已回滚)";
         }
-        current_query->appendPlainText(errMsg);
+        ui->show->appendPlainText(errMsg);
     } catch (...) {
         QString errMsg = "发生未知类型的严重错误。";
         if (db_manager.isInTransaction()) {
             db_manager.rollbackTransaction();
             errMsg += " (事务已回滚)";
         }
-        current_query->appendPlainText(errMsg);
+        ui->show->appendPlainText(errMsg);
     }
 }
 
@@ -203,12 +213,12 @@ void MainWindow::handleCreateDatabase(const QString& command) {
     if (match.hasMatch()) {
         QString db_name = match.captured(1);
         if (db_manager.createdatabase(db_name)) {
-            current_query->appendPlainText(QString("数据库 '%1' 创建成功。").arg(db_name));
+            ui->show->appendPlainText(QString("数据库 '%1' 创建成功。").arg(db_name));
         } else {
-            current_query->appendPlainText(QString("错误: 创建数据库 '%1' 失败 (可能已存在或名称无效)。").arg(db_name));
+            ui->show->appendPlainText(QString("错误: 创建数据库 '%1' 失败 (可能已存在或名称无效)。").arg(db_name));
         }
     } else {
-        current_query->appendPlainText("语法错误: CREATE DATABASE <数据库名>");
+        ui->show->appendPlainText("语法错误: CREATE DATABASE <数据库名>");
     }
 }
 
@@ -219,12 +229,12 @@ void MainWindow::handleUseDatabase(const QString& command) {
         QString db_name = match.captured(1);
         if (db_manager.use_database(db_name)) {
             current_db = db_name;
-            current_query->appendPlainText(QString("已切换到数据库 '%1'。").arg(db_name));
+            ui->show->appendPlainText(QString("已切换到数据库 '%1'。").arg(db_name));
         } else {
-            current_query->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
+            ui->show->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         }
     } else {
-        current_query->appendPlainText("语法错误: USE <数据库名>");
+        ui->show->appendPlainText("语法错误: USE <数据库名>");
     }
 }
 
@@ -238,19 +248,19 @@ void MainWindow::handleDropDatabase(const QString& command) {
                                                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (reply == QMessageBox::Yes) {
             if (db_manager.dropdatabase(db_name)) {
-                current_query->appendPlainText(QString("数据库 '%1' 已删除。").arg(db_name));
+                ui->show->appendPlainText(QString("数据库 '%1' 已删除。").arg(db_name));
                 if (current_db.compare(db_name, Qt::CaseInsensitive) == 0) {
                     current_db.clear();
-                    current_query->appendPlainText("注意：当前使用的数据库已被删除。");
+                    ui->show->appendPlainText("注意：当前使用的数据库已被删除。");
                 }
             } else {
-                current_query->appendPlainText(QString("错误: 删除数据库 '%1' 失败 (可能不存在或文件删除失败)。").arg(db_name));
+                ui->show->appendPlainText(QString("错误: 删除数据库 '%1' 失败 (可能不存在或文件删除失败)。").arg(db_name));
             }
         } else {
-            current_query->appendPlainText("删除数据库操作已取消。");
+            ui->show->appendPlainText("删除数据库操作已取消。");
         }
     } else {
-        current_query->appendPlainText("语法错误: DROP DATABASE <数据库名>");
+        ui->show->appendPlainText("语法错误: DROP DATABASE <数据库名>");
     }
 }
 
@@ -260,7 +270,7 @@ void MainWindow::handleCreateTable(QString& command) {
     QRegularExpressionMatch match = re.match(processedCommand);
 
     if (!match.hasMatch()) {
-        current_query->appendPlainText("语法错误: CREATE TABLE <表名> (<列定义1> <类型1> [约束1], ...)");
+        ui->show->appendPlainText("语法错误: CREATE TABLE <表名> (<列定义1> <类型1> [约束1], ...)");
         return;
     }
     QString table_name = match.captured(1).trimmed();
@@ -268,7 +278,7 @@ void MainWindow::handleCreateTable(QString& command) {
     QString current_db_name = db_manager.get_current_database();
 
     if (current_db_name.isEmpty()) {
-        current_query->appendPlainText("错误: 未选择数据库。请先使用 USE <数据库名> 命令。");
+        ui->show->appendPlainText("错误: 未选择数据库。请先使用 USE <数据库名> 命令。");
         return;
     }
 
@@ -319,7 +329,7 @@ void MainWindow::handleCreateTable(QString& command) {
             QRegularExpression field_re(R"(([\w_]+)\s+([\w\s\(\),'"\-\\]+?)(?:\s+(.*))?$)", QRegularExpression::CaseInsensitiveOption);
             QRegularExpressionMatch field_match = field_re.match(def_str);
             if (!field_match.hasMatch()) {
-                current_query->appendPlainText("错误: 无效的列定义格式: " + def_str);
+                ui->show->appendPlainText("错误: 无效的列定义格式: " + def_str);
                 return;
             }
             QString field_name = field_match.captured(1).trimmed();
@@ -336,7 +346,7 @@ void MainWindow::handleCreateTable(QString& command) {
                 if(!sizeConstraintExists) constraints.prepend("SIZE(" + QString::number(size_val) + ")");
             } else if (type == xhyfield::CHAR && size_val <= 0) {
                 if (type_str_full.toUpper().startsWith("CHAR") && !type_str_full.toUpper().contains("(")) {
-                    current_query->appendPlainText(QString("错误: CHAR类型字段 '%1' 必须指定长度, 如 CHAR(10).").arg(field_name));
+                    ui->show->appendPlainText(QString("错误: CHAR类型字段 '%1' 必须指定长度, 如 CHAR(10).").arg(field_name));
                     return;
                 }
             }
@@ -349,7 +359,7 @@ void MainWindow::handleCreateTable(QString& command) {
                     new_field_enum.set_enum_values(enum_vals_str); // 此函数需要存在于 xhyfield 类中
                     new_table.addfield(new_field_enum);
                 } else {
-                    current_query->appendPlainText(QString("错误: ENUM 类型字段 '%1' 定义无效，应为 ENUM('val1','val2',...).").arg(field_name));
+                    ui->show->appendPlainText(QString("错误: ENUM 类型字段 '%1' 定义无效，应为 ENUM('val1','val2',...).").arg(field_name));
                     return;
                 }
             } else {
@@ -363,14 +373,14 @@ void MainWindow::handleCreateTable(QString& command) {
     }
 
     if (new_table.fields().isEmpty() && !fields_and_constraints_str.contains("CONSTRAINT", Qt::CaseInsensitive) ){
-        current_query->appendPlainText("错误: 表至少需要定义一列或一个约束。");
+        ui->show->appendPlainText("错误: 表至少需要定义一列或一个约束。");
         return;
     }
 
     if (db_manager.createtable(current_db_name, new_table)) {
-        current_query->appendPlainText(QString("表 '%1' 在数据库 '%2' 中创建成功。").arg(table_name, current_db_name));
+        ui->show->appendPlainText(QString("表 '%1' 在数据库 '%2' 中创建成功。").arg(table_name, current_db_name));
     } else {
-        current_query->appendPlainText(QString("错误: 创建表 '%1' 失败 (可能已存在或定义无效)。").arg(table_name));
+        ui->show->appendPlainText(QString("错误: 创建表 '%1' 失败 (可能已存在或定义无效)。").arg(table_name));
     }
 }
 
@@ -381,21 +391,21 @@ void MainWindow::handleDropTable(const QString& command) {
     if (match.hasMatch()) {
         QString table_name = match.captured(1);
         QString current_db_name = db_manager.get_current_database();
-        if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+        if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
         QMessageBox::StandardButton reply = QMessageBox::warning(this, "确认删除表",
                                                                  QString("确定要永久删除表 '%1' 吗? 此操作不可恢复!").arg(table_name),
                                                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (reply == QMessageBox::Yes) {
             if (db_manager.droptable(current_db_name, table_name)) {
-                current_query->appendPlainText(QString("表 '%1' 已从数据库 '%2' 删除。").arg(table_name, current_db_name));
+                ui->show->appendPlainText(QString("表 '%1' 已从数据库 '%2' 删除。").arg(table_name, current_db_name));
             } else {
-                current_query->appendPlainText(QString("错误: 删除表 '%1' 失败 (可能不存在)。").arg(table_name));
+                ui->show->appendPlainText(QString("错误: 删除表 '%1' 失败 (可能不存在)。").arg(table_name));
             }
         } else {
-            current_query->appendPlainText("删除表操作已取消。");
+            ui->show->appendPlainText("删除表操作已取消。");
         }
     } else {
-        current_query->appendPlainText("语法错误: DROP TABLE <表名>");
+        ui->show->appendPlainText("语法错误: DROP TABLE <表名>");
     }
 }
 
@@ -405,10 +415,10 @@ void MainWindow::handleDescribe(const QString& command) {
     if (match.hasMatch()) {
         QString table_name = match.captured(1);
         QString current_db_name = db_manager.get_current_database();
-        if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+        if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
         show_schema(current_db_name, table_name);
     } else {
-        current_query->appendPlainText("语法错误: DESCRIBE <表名> 或 DESC <表名>");
+        ui->show->appendPlainText("语法错误: DESCRIBE <表名> 或 DESC <表名>");
     }
 }
 
@@ -420,7 +430,7 @@ void MainWindow::handleInsert(const QString& command) {
     QRegularExpressionMatch main_match = re.match(command.trimmed());
 
     if (!main_match.hasMatch()) {
-        current_query->appendPlainText("语法错误: INSERT INTO 表名 [(列名1,...)] VALUES (值1,...)[, (值A,...)];");
+        ui->show->appendPlainText("语法错误: INSERT INTO 表名 [(列名1,...)] VALUES (值1,...)[, (值A,...)];");
         return;
     }
 
@@ -429,12 +439,12 @@ void MainWindow::handleInsert(const QString& command) {
     QString all_value_groups_string = main_match.captured(3).trimmed();
 
     QString current_db_name = db_manager.get_current_database();
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
 
     bool transactionStartedHere = false;
     if (!db_manager.isInTransaction()) {
         if(!db_manager.beginTransaction()) {
-            current_query->appendPlainText("警告: 无法开始新事务，操作将在无事务保护下进行。");
+            ui->show->appendPlainText("警告: 无法开始新事务，操作将在无事务保护下进行。");
         } else transactionStartedHere = true;
     }
 
@@ -491,20 +501,20 @@ void MainWindow::handleInsert(const QString& command) {
 
         if (transactionStartedHere) {
             if (db_manager.commitTransaction()) {
-                current_query->appendPlainText(QString("%1 行数据已成功插入。").arg(total_inserted));
+                ui->show->appendPlainText(QString("%1 行数据已成功插入。").arg(total_inserted));
             } else {
-                current_query->appendPlainText("错误: 事务提交失败，更改已回滚。");
+                ui->show->appendPlainText("错误: 事务提交失败，更改已回滚。");
             }
         } else {
-            current_query->appendPlainText(QString("%1 行数据已插入 (在现有事务中或无事务)。").arg(total_inserted));
+            ui->show->appendPlainText(QString("%1 行数据已插入 (在现有事务中或无事务)。").arg(total_inserted));
         }
 
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("插入数据错误: " + QString::fromStdString(e.what()));
+        ui->show->appendPlainText("插入数据错误: " + QString::fromStdString(e.what()));
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("插入数据时发生未知错误。");
+        ui->show->appendPlainText("插入数据时发生未知错误。");
     }
 }
 
@@ -676,6 +686,29 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         return node;
     }
 
+
+    // zyh在这里加了这样一段，然后就可以处理BETWEEN ... AND ...语句了
+    if (expression.contains("BETWEEN", Qt::CaseInsensitive)) {
+        // 解析 BETWEEN ... AND ...
+        QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatch match = betweenRegex.match(expression);
+
+        if (match.hasMatch()) {
+            QString field = match.captured(1).trimmed();
+            QString value1 = match.captured(2).trimmed();
+            QString value2 = match.captured(3).trimmed();
+
+            node.type = ConditionNode::COMPARISON_OP;
+            node.comparison.fieldName = field;
+            node.comparison.operation = "BETWEEN";
+            node.comparison.value = parseLiteralValue(value1);
+            node.comparison.value2 = parseLiteralValue(value2);
+
+            qDebug() << "Parsed BETWEEN: Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
+            return node;
+        }
+    }
+
     // 3. 处理逻辑运算符 OR, AND
     //    findLowestPrecedenceOperator 应优先找到 OR (如果它在列表中靠前)
     QPair<int, QString> opDetails = findLowestPrecedenceOperator(expression, {"OR", "AND"});
@@ -713,12 +746,15 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         bool opTakesNoRightValue = (op.compare("IS NULL", Qt::CaseInsensitive) == 0 || op.compare("IS NOT NULL", Qt::CaseInsensitive) == 0);
 
         if (opTakesNoRightValue) {
+            // 无右值操作符，如 IS NULL 或 IS NOT NULL
             patternStr = QString(R"(^\s*%1\s+(%2)\s*$)").arg(fieldNamePattern).arg(QRegularExpression::escape(op));
         } else if (op.compare("BETWEEN", Qt::CaseInsensitive) == 0 || op.compare("NOT BETWEEN", Qt::CaseInsensitive) == 0) {
-            // 操作符两侧的空格为 \s* (可选), AND 两侧为 \s+ (必需)
-            patternStr = QString(R"(^\s*%1\s*(%2)\s*(.+?)\s+AND\s+(.+?)\s*$)").arg(fieldNamePattern).arg(QRegularExpression::escape(op));
+            // BETWEEN 操作符，两侧为 \s* (可选), AND 两侧为 \s+ (必需)
+            patternStr = QString(R"(^\s*(%1)\s+(%2)\s+([\w\d_.]+|\'.*?\'|\".*?\")\s+AND\s+([\w\d_.]+|\'.*?\'|\".*?\")\s*$)")
+                             .arg(fieldNamePattern)
+                             .arg(QRegularExpression::escape(op));
         } else {
-            // 操作符两侧的空格为 \s* (可选)
+            // 二元比较运算符，如 >, <, =
             patternStr = QString(R"(^\s*%1\s*(%2)\s*(.+)\s*$)").arg(fieldNamePattern).arg(QRegularExpression::escape(op));
         }
 
@@ -729,10 +765,28 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         if (match.hasMatch()) {
             qDebug() << "  Matched comparison operator: '" << op << "' for expression: '" << expression << "'";
             node.type = ConditionNode::COMPARISON_OP;
-            node.comparison.fieldName = match.captured(1).trimmed();
-            node.comparison.operation = op.toUpper(); // 使用列表中的 op (已规范化)
+            QString fieldName = match.captured(1).trimmed(); // 临时变量
+
+            // 处理带别名的字段
+            if (fieldName.contains('.')) {
+                QStringList parts = fieldName.split('.');
+                QString alias = parts[0].trimmed(); // 别名
+                QString actualFieldName = parts[1].trimmed(); // 字段名
+
+                // 验证别名
+                if (alias.compare("e", Qt::CaseInsensitive) == 0) { // 假设 "e" 是你的表别名
+                    node.comparison.fieldName = actualFieldName;
+                } else {
+                    throw std::runtime_error("未知的别名: " + alias.toStdString());
+                }
+            } else {
+                node.comparison.fieldName = fieldName;
+            }
+
+            node.comparison.operation = op.toUpper();
             qDebug() << "    Field: '" << node.comparison.fieldName << "', Op: '" << node.comparison.operation << "'";
 
+            // 处理BETWEEN
             if (op.compare("BETWEEN", Qt::CaseInsensitive) == 0 || op.compare("NOT BETWEEN", Qt::CaseInsensitive) == 0) {
                 QString val1Str = match.captured(3).trimmed(); // captured(2) 是操作符本身
                 QString val2Str = match.captured(4).trimmed();
@@ -803,7 +857,7 @@ bool MainWindow::parseWhereClause(const QString& whereStr, ConditionNode& rootNo
     } catch (const std::runtime_error& e) {
         QString errorMsg = "解析WHERE子句错误: " + QString::fromStdString(e.what());
         qDebug() << "[parseWhereClause] Error:" << errorMsg;
-        current_query->appendPlainText(errorMsg); // 显示错误到UI
+        ui->show->appendPlainText(errorMsg); // 显示错误到UI
         return false;
     }
 }
@@ -812,7 +866,7 @@ bool MainWindow::parseWhereClause(const QString& whereStr, ConditionNode& rootNo
 void MainWindow::handleUpdate(const QString& command) {
     QString current_db_name = db_manager.get_current_database();
     if (current_db_name.isEmpty()) {
-        current_query->appendPlainText("错误: 未选择数据库");
+        ui->show->appendPlainText("错误: 未选择数据库");
         return;
     }
 
@@ -823,7 +877,7 @@ void MainWindow::handleUpdate(const QString& command) {
     QRegularExpressionMatch match = re.match(command.trimmed());
 
     if (!match.hasMatch()) {
-        current_query->appendPlainText("语法错误: UPDATE 表名 SET 列1=值1,... [WHERE 条件]");
+        ui->show->appendPlainText("语法错误: UPDATE 表名 SET 列1=值1,... [WHERE 条件]");
         return;
     }
 
@@ -835,7 +889,7 @@ void MainWindow::handleUpdate(const QString& command) {
     bool transactionStartedHere = false;
     if (!db_manager.isInTransaction()) {
         if (!db_manager.beginTransaction()) {
-            current_query->appendPlainText("警告: 无法开始新事务，操作将在无事务保护下进行。");
+            ui->show->appendPlainText("警告: 无法开始新事务，操作将在无事务保护下进行。");
         } else {
             transactionStartedHere = true;
         }
@@ -866,34 +920,34 @@ void MainWindow::handleUpdate(const QString& command) {
         if (affected_rows >= 0) {
             if (transactionStartedHere) {
                 if (db_manager.commitTransaction()) {
-                    current_query->appendPlainText(QString("%1 行已更新。").arg(affected_rows));
+                    ui->show->appendPlainText(QString("%1 行已更新。").arg(affected_rows));
                 } else {
-                    current_query->appendPlainText("错误：事务提交失败。更改已回滚。");
+                    ui->show->appendPlainText("错误：事务提交失败。更改已回滚。");
                 }
             } else {
-                current_query->appendPlainText(QString("%1 行已更新 (在现有事务中)。").arg(affected_rows));
+                ui->show->appendPlainText(QString("%1 行已更新 (在现有事务中)。").arg(affected_rows));
             }
         } else {
-            current_query->appendPlainText("错误：更新数据失败。");
+            ui->show->appendPlainText("错误：更新数据失败。");
             if(transactionStartedHere) db_manager.rollbackTransaction();
         }
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("更新操作错误: " + QString::fromStdString(e.what()));
+        ui->show->appendPlainText("更新操作错误: " + QString::fromStdString(e.what()));
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("更新操作发生未知错误。");
+        ui->show->appendPlainText("更新操作发生未知错误。");
     }
 }
 
 void MainWindow::handleDelete(const QString& command) {
     QString current_db_name = db_manager.get_current_database();
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
 
     QRegularExpression re(R"(DELETE\s+FROM\s+([\w\.]+)(?:\s+WHERE\s+(.+))?\s*;?$)",
                           QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     QRegularExpressionMatch match = re.match(command.trimmed());
-    if (!match.hasMatch()) { current_query->appendPlainText("语法错误: DELETE FROM <表名> [WHERE <条件>]"); return; }
+    if (!match.hasMatch()) { ui->show->appendPlainText("语法错误: DELETE FROM <表名> [WHERE <条件>]"); return; }
     QString table_name = match.captured(1).trimmed();
     QString where_part = match.captured(2).trimmed();
 
@@ -909,7 +963,7 @@ void MainWindow::handleDelete(const QString& command) {
                                                                       QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
             if (reply == QMessageBox::No) {
                 if (transactionStartedHere) db_manager.rollbackTransaction();
-                current_query->appendPlainText("删除操作已取消。");
+                ui->show->appendPlainText("删除操作已取消。");
                 return;
             }
         }
@@ -922,85 +976,146 @@ void MainWindow::handleDelete(const QString& command) {
         if (affected_rows >= 0) {
             if (transactionStartedHere) {
                 if (db_manager.commitTransaction()) {
-                    current_query->appendPlainText(QString("%1 行已删除。").arg(affected_rows));
-                } else { current_query->appendPlainText("错误：事务提交失败。更改已回滚。");}
+                    ui->show->appendPlainText(QString("%1 行已删除。").arg(affected_rows));
+                } else { ui->show->appendPlainText("错误：事务提交失败。更改已回滚。");}
             } else {
-                current_query->appendPlainText(QString("%1 行已删除 (在现有事务中)。").arg(affected_rows));
+                ui->show->appendPlainText(QString("%1 行已删除 (在现有事务中)。").arg(affected_rows));
             }
-        } else { current_query->appendPlainText("错误：删除数据失败。"); if(transactionStartedHere) db_manager.rollbackTransaction(); }
+        } else { ui->show->appendPlainText("错误：删除数据失败。"); if(transactionStartedHere) db_manager.rollbackTransaction(); }
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("删除操作错误: " + QString::fromStdString(e.what()));
+        ui->show->appendPlainText("删除操作错误: " + QString::fromStdString(e.what()));
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("删除操作发生未知错误。");
+        ui->show->appendPlainText("删除操作发生未知错误。");
     }
 }
 
 void MainWindow::handleSelect(const QString& command) {
     QRegularExpression re(
-        R"(SELECT\s+(.+?)\s+FROM\s+([\w\.]+)(?:\s+WHERE\s+(.+))?\s*;?)",
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption
-        );
+        R"(SELECT\s+(.+?)\s+FROM\s+([\w_]+)(?:\s+([\w_]+))?(?:\s+WHERE\s+(.+))?\s*;?)",
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+
     QRegularExpressionMatch match = re.match(command.trimmed());
     if (!match.hasMatch()) {
-        current_query->appendPlainText("语法错误: SELECT <列名1,...|*> FROM <表名> [WHERE <条件>]");
+        ui->show->appendPlainText("语法错误: SELECT <列名1>[, <列名2>, ...] FROM <表名> [别名] [WHERE <条件>]");
         return;
     }
 
-    QString select_cols_str = match.captured(1).trimmed();
+    QString select_fields_str = match.captured(1).trimmed();
     QString table_name = match.captured(2).trimmed();
-    QString where_part = match.captured(3).trimmed();
-    QString current_db_name = db_manager.get_current_database();
+    QString table_alias = match.captured(3).trimmed();
+    QString where_clause = match.captured(4).trimmed();
 
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    QString current_db_name = db_manager.get_current_database();
+    if (current_db_name.isEmpty()) {
+        ui->show->appendPlainText("错误: 未选择数据库。");
+        return;
+    }
 
     xhydatabase* db = db_manager.find_database(current_db_name);
-    if (!db) { current_query->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return; }
+    if (!db) {
+        ui->show->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(current_db_name));
+        return;
+    }
+
     xhytable* table = db->find_table(table_name);
-    if (!table) { current_query->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, current_db_name)); return; }
-
-    ConditionNode conditionRoot;
-    if (!parseWhereClause(where_part, conditionRoot)) { return; } // **Aufruf**
-
-    QVector<xhyrecord> results;
-    if (!db_manager.selectData(current_db_name, table_name, conditionRoot, results)) {
+    if (!table) {
+        ui->show->appendPlainText(QString("错误: 表 '%1' 不存在。").arg(table_name));
         return;
     }
 
-    if (results.isEmpty()) {
-        current_query->appendPlainText("查询结果为空。");
+    QStringList select_fields = select_fields_str.split(',', Qt::SkipEmptyParts);
+    for (QString& field : select_fields) {
+        field = field.trimmed();
+    }
+
+    QVector<xhyrecord> all_records;
+    if (!table->selectData(ConditionNode(), all_records)) { // 先获取所有数据
+        ui->show->appendPlainText(QString("错误: 从表 '%1' 选择数据失败。").arg(table_name));
         return;
     }
 
-    QStringList display_columns;
-    if (select_cols_str == "*") {
-        for (const auto& field : table->fields()) {
-            display_columns.append(field.name());
+    QVector<xhyrecord> filtered_records;
+    if (where_clause.isEmpty()) {
+        filtered_records = all_records; // 没有 WHERE 子句，选择所有记录
+    } else {
+        // 简单的 WHERE 子句处理 (仅支持简单的等于比较，例如: e.age = 30)
+        QRegularExpression where_item_re(R"(([\w.]+)\s*=\s*('([^']*)'|(\d+)))", QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatchIterator it = where_item_re.globalMatch(where_clause);
+        while (it.hasNext()) {
+            QRegularExpressionMatch where_match = it.next();
+            QString field_with_alias = where_match.captured(1).trimmed();
+            QString value_quoted = where_match.captured(2).trimmed();
+            QString string_value = where_match.captured(3).trimmed();
+            QString numeric_value = where_match.captured(4).trimmed();
+
+            QString actual_field_name = field_with_alias.contains('.') ? field_with_alias.split('.').last() : field_with_alias;
+            QString record_alias = field_with_alias.contains('.') ? field_with_alias.split('.').first() : table_name;
+
+            bool match_all = true;
+            for (const auto& record : all_records) {
+                QString record_table_name = table->name(); // 假设 xhyrecord 或 xhytable 可以获取表名
+                QString effective_alias = table_alias.isEmpty() ? record_table_name : table_alias;
+
+                if (record_alias.compare(effective_alias, Qt::CaseInsensitive) == 0) {
+                    QString record_value = record.value(actual_field_name);
+                    bool current_match = false;
+                    if (!string_value.isEmpty() && record_value == string_value) {
+                        current_match = true;
+                    } else if (!numeric_value.isEmpty() && record_value == numeric_value) {
+                        current_match = true;
+                    }
+
+                    if (current_match) {
+                        filtered_records.append(record);
+                    }
+                }
+            }
+            break; // 仅处理第一个简单的 WHERE 条件
+        }
+        if (filtered_records.isEmpty() && !where_clause.isEmpty()) {
+            ui->show->appendPlainText(QString("警告: WHERE 子句 '%1' 无法完全处理，可能包含复杂语法。").arg(where_clause));
+            filtered_records = all_records; // 作为回退，显示所有记录
+        }
+    }
+
+    // 处理表别名
+    QString effectiveTableName = table_alias.isEmpty() ? table_name : table_alias;
+
+    // 输出结果
+    QString output;
+    if (select_fields.count() == 1 && select_fields[0] == "*") {
+        // SELECT *
+        for (const xhyfield& field : table->fields()) {
+            output += field.name() + "\t";
+        }
+        output = output.trimmed() + "\n";
+        output += QString(output.length(), '-') + "\n";
+
+        for (const xhyrecord& record : filtered_records) {
+            for (const xhyfield& field : table->fields()) {
+                output += record.value(field.name()) + "\t";
+            }
+            output = output.trimmed() + "\n";
         }
     } else {
-        display_columns = select_cols_str.split(',', Qt::SkipEmptyParts);
-        for (QString& col : display_columns) {
-            col = col.trimmed();
-            if (!table->has_field(col)) {
-                current_query->appendPlainText(QString("错误: 选择的列 '%1' 在表 '%2' 中不存在。").arg(col, table_name));
-                return;
+        // SELECT 列名
+        for (const QString& field : select_fields) {
+            output += field + "\t";
+        }
+        output = output.trimmed() + "\n";
+        output += QString(output.length(), '-') + "\n";
+
+        for (const xhyrecord& record : filtered_records) {
+            for (const QString& field : select_fields) {
+                QString columnName = field.contains('.') ? field.split('.').last() : field; // 提取实际列名
+                output += record.value(columnName) + "\t";
             }
+            output = output.trimmed() + "\n";
         }
     }
-
-    QString header_str;
-    for (const QString& col_name : display_columns) { header_str += col_name + "\t"; }
-    current_query->appendPlainText(header_str.trimmed());
-    current_query->appendPlainText(QString(header_str.length()*2 < 80 ? header_str.length()*2 : 80, '-'));
-
-    for (const auto& record : results) {
-        QString row_str;
-        for (const QString& col_name : display_columns) {
-            row_str += record.value(col_name) + "\t";
-        }
-        current_query->appendPlainText(row_str.trimmed());
-    }
+    ui->show->appendPlainText(output);
 }
 
 
@@ -1012,7 +1127,7 @@ void MainWindow::handleAlterTable(const QString& command) {
     QRegularExpressionMatch match = re.match(command.trimmed());
 
     if (!match.hasMatch()) {
-        current_query->appendPlainText("语法错误: ALTER TABLE <表名> ADD|DROP|ALTER|MODIFY|RENAME [COLUMN] <参数>");
+        ui->show->appendPlainText("语法错误: ALTER TABLE <表名> ADD|DROP|ALTER|MODIFY|RENAME [COLUMN] <参数>");
         return;
     }
 
@@ -1021,7 +1136,7 @@ void MainWindow::handleAlterTable(const QString& command) {
     QString parameters = match.captured(3).trimmed();
     QString current_db_name = db_manager.get_current_database();
 
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
 
     bool success = false;
     QString result_msg;
@@ -1123,22 +1238,22 @@ void MainWindow::handleAlterTable(const QString& command) {
 
         if (success) {
             if (transactionStartedHere) {
-                if(db_manager.commitTransaction()) current_query->appendPlainText(result_msg);
-                else current_query->appendPlainText("错误：事务提交失败。" + result_msg);
+                if(db_manager.commitTransaction()) ui->show->appendPlainText(result_msg);
+                else ui->show->appendPlainText("错误：事务提交失败。" + result_msg);
             } else {
-                current_query->appendPlainText(result_msg + " (在现有事务中)");
+                ui->show->appendPlainText(result_msg + " (在现有事务中)");
             }
         } else {
             if (transactionStartedHere) db_manager.rollbackTransaction();
-            current_query->appendPlainText("错误: " + result_msg);
+            ui->show->appendPlainText("错误: " + result_msg);
         }
 
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("ALTER TABLE 操作错误: " + QString::fromStdString(e.what()));
+        ui->show->appendPlainText("ALTER TABLE 操作错误: " + QString::fromStdString(e.what()));
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("ALTER TABLE 操作发生未知错误。");
+        ui->show->appendPlainText("ALTER TABLE 操作发生未知错误。");
     }
 }
 
@@ -1149,7 +1264,7 @@ void MainWindow::handleExplainSelect(const QString& command) {
     QRegularExpressionMatch match = re.match(command.trimmed());
 
     if (!match.hasMatch()) {
-        current_query->appendPlainText("语法错误: EXPLAIN SELECT * FROM <表名> [WHERE <条件>]");
+        ui->show->appendPlainText("语法错误: EXPLAIN SELECT * FROM <表名> [WHERE <条件>]");
         return;
     }
 
@@ -1157,12 +1272,12 @@ void MainWindow::handleExplainSelect(const QString& command) {
     QString wherePart = match.captured(2).trimmed();
 
     QString current_db_name = db_manager.get_current_database();
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
 
     xhydatabase* db = db_manager.find_database(current_db_name);
-    if (!db) { current_query->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return; }
+    if (!db) { ui->show->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return; }
     xhytable* table = db->find_table(tableName);
-    if (!table) { current_query->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(tableName, current_db_name)); return; }
+    if (!table) { ui->show->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(tableName, current_db_name)); return; }
 
     ConditionNode conditionRootForExplain;
     if (!parseWhereClause(wherePart, conditionRootForExplain)) { // **Aufruf**
@@ -1190,35 +1305,35 @@ void MainWindow::handleExplainSelect(const QString& command) {
     if (!firstFieldNameInCondition.isEmpty()) {
         const xhyindex* index = db->findIndex(firstFieldNameInCondition);
         if (index && index->tableName().compare(tableName, Qt::CaseInsensitive) == 0) {
-            current_query->appendPlainText(QString("查询计划: 可能使用字段 '%1' 上的索引 '%2'。").arg(firstFieldNameInCondition, index->name()));
+            ui->show->appendPlainText(QString("查询计划: 可能使用字段 '%1' 上的索引 '%2'。").arg(firstFieldNameInCondition, index->name()));
         } else {
-            current_query->appendPlainText(QString("查询计划: 字段 '%1' 上没有直接可用的索引，或索引不属于表 '%2'。可能进行全表扫描。").arg(firstFieldNameInCondition, tableName));
+            ui->show->appendPlainText(QString("查询计划: 字段 '%1' 上没有直接可用的索引，或索引不属于表 '%2'。可能进行全表扫描。").arg(firstFieldNameInCondition, tableName));
         }
     } else if (!wherePart.isEmpty()){
-        current_query->appendPlainText("查询计划: 无法从WHERE条件中简单提取用于索引检查的字段，可能进行全表扫描。");
+        ui->show->appendPlainText("查询计划: 无法从WHERE条件中简单提取用于索引检查的字段，可能进行全表扫描。");
     } else {
-        current_query->appendPlainText("查询计划: 无WHERE条件，将进行全表扫描。");
+        ui->show->appendPlainText("查询计划: 无WHERE条件，将进行全表扫描。");
     }
 
-    current_query->appendPlainText("模拟执行查询以验证...");
+    ui->show->appendPlainText("模拟执行查询以验证...");
     QVector<xhyrecord> results;
     if (db_manager.selectData(current_db_name, tableName, conditionRootForExplain, results)) {
         QString header_str;
         for (const auto& field : table->fields()) { header_str += field.name() + "\t"; }
-        current_query->appendPlainText(header_str.trimmed());
-        current_query->appendPlainText(QString(header_str.length()*2 < 80 ? header_str.length()*2 : 80, '-'));
+        ui->show->appendPlainText(header_str.trimmed());
+        ui->show->appendPlainText(QString(header_str.length()*2 < 80 ? header_str.length()*2 : 80, '-'));
         if (results.isEmpty()) {
-            current_query->appendPlainText("(无符合条件的数据)");
+            ui->show->appendPlainText("(无符合条件的数据)");
         } else {
             for (const auto& record : results) {
                 QString row_str;
                 for (const auto& field : table->fields()) { row_str += record.value(field.name()) + "\t"; }
-                current_query->appendPlainText(row_str.trimmed());
+                ui->show->appendPlainText(row_str.trimmed());
             }
-            current_query->appendPlainText(QString("共 %1 行结果。").arg(results.size()));
+            ui->show->appendPlainText(QString("共 %1 行结果。").arg(results.size()));
         }
     } else {
-        current_query->appendPlainText("执行 EXPLAIN 的模拟查询时出错。");
+        ui->show->appendPlainText("执行 EXPLAIN 的模拟查询时出错。");
     }
 }
 
@@ -1227,7 +1342,7 @@ void MainWindow::handleCreateIndex(const QString& command) {
     QRegularExpression re(R"(CREATE\s+(UNIQUE\s+)?INDEX\s+([\w_]+)\s+ON\s+([\w_]+)\s*\((.+)\)\s*;?)", QRegularExpression::CaseInsensitiveOption);
     QRegularExpressionMatch match = re.match(command.trimmed());
     if (!match.hasMatch()) {
-        current_query->appendPlainText("语法错误: CREATE [UNIQUE] INDEX <索引名> ON <表名> (<列1>[, <列2>...])");
+        ui->show->appendPlainText("语法错误: CREATE [UNIQUE] INDEX <索引名> ON <表名> (<列1>[, <列2>...])");
         return;
     }
     bool unique = !match.captured(1).trimmed().isEmpty();
@@ -1236,28 +1351,28 @@ void MainWindow::handleCreateIndex(const QString& command) {
     QString colsPart = match.captured(4).trimmed();
     QStringList cols = colsPart.split(',', Qt::SkipEmptyParts);
 
-    for(auto &c : cols) { c = c.trimmed().split(" ").first(); if (c.isEmpty()) {current_query->appendPlainText("错误：索引列名不能为空。"); return;} }
-    if (cols.isEmpty()){ current_query->appendPlainText("错误：索引必须至少包含一列。"); return; }
+    for(auto &c : cols) { c = c.trimmed().split(" ").first(); if (c.isEmpty()) {ui->show->appendPlainText("错误：索引列名不能为空。"); return;} }
+    if (cols.isEmpty()){ ui->show->appendPlainText("错误：索引必须至少包含一列。"); return; }
 
     QString current_db_name = db_manager.get_current_database();
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
 
     auto* db = db_manager.find_database(current_db_name);
-    if (!db) { current_query->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return; }
+    if (!db) { ui->show->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return; }
 
     xhytable* table = db->find_table(tablename);
-    if (!table) { current_query->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(tablename, current_db_name)); return; }
+    if (!table) { ui->show->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(tablename, current_db_name)); return; }
 
     for(const auto &col : cols) {
         if (!table->has_field(col)) {
-            current_query->appendPlainText(QString("错误: 字段 '%1' 在表 '%2' 中不存在。").arg(col, tablename)); return;
+            ui->show->appendPlainText(QString("错误: 字段 '%1' 在表 '%2' 中不存在。").arg(col, tablename)); return;
         }
     }
 
     if(db->createIndex(xhyindex(idxname, tablename, cols, unique))) {
-        current_query->appendPlainText(QString("索引 '%1' 在表 '%2' 上创建成功。").arg(idxname, tablename));
+        ui->show->appendPlainText(QString("索引 '%1' 在表 '%2' 上创建成功。").arg(idxname, tablename));
     } else {
-        current_query->appendPlainText(QString("错误：创建索引 '%1' 失败 (可能已存在或名称/列定义无效)。").arg(idxname));
+        ui->show->appendPlainText(QString("错误：创建索引 '%1' 失败 (可能已存在或名称/列定义无效)。").arg(idxname));
     }
 }
 
@@ -1265,29 +1380,29 @@ void MainWindow::handleDropIndex(const QString& command) {
     QRegularExpression re(R"(DROP\s+INDEX\s+([\w_]+)(?:\s+ON\s+([\w_]+))?\s*;?)", QRegularExpression::CaseInsensitiveOption);
     QRegularExpressionMatch match = re.match(command.trimmed());
     if(!match.hasMatch()){
-        current_query->appendPlainText("语法错误: DROP INDEX <索引名> [ON <表名>]");
+        ui->show->appendPlainText("语法错误: DROP INDEX <索引名> [ON <表名>]");
         return;
     }
     QString idxname = match.captured(1).trimmed();
     QString onTableName = match.captured(2).trimmed();
 
     QString current_db_name = db_manager.get_current_database();
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
     auto* db = db_manager.find_database(current_db_name);
-    if(!db){ current_query->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return;}
+    if(!db){ ui->show->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return;}
 
     if(!onTableName.isEmpty()){
         const xhyindex* idxToDrop = db->findIndexByName(idxname);
         if(idxToDrop && idxToDrop->tableName().compare(onTableName, Qt::CaseInsensitive) != 0){
-            current_query->appendPlainText(QString("错误: 索引 '%1' 不属于表 '%2'。").arg(idxname, onTableName));
+            ui->show->appendPlainText(QString("错误: 索引 '%1' 不属于表 '%2'。").arg(idxname, onTableName));
             return;
         }
     }
 
     if(db->dropIndex(idxname)) {
-        current_query->appendPlainText(QString("索引 '%1' 已删除。").arg(idxname));
+        ui->show->appendPlainText(QString("索引 '%1' 已删除。").arg(idxname));
     } else {
-        current_query->appendPlainText(QString("错误：删除索引 '%1' 失败 (可能不存在)。").arg(idxname));
+        ui->show->appendPlainText(QString("错误：删除索引 '%1' 失败 (可能不存在)。").arg(idxname));
     }
 }
 
@@ -1300,13 +1415,13 @@ void MainWindow::handleShowIndexes(const QString& command) {
     }
 
     QString current_db_name = db_manager.get_current_database();
-    if (current_db_name.isEmpty()) { current_query->appendPlainText("错误: 未选择数据库。"); return; }
+    if (current_db_name.isEmpty()) { ui->show->appendPlainText("错误: 未选择数据库。"); return; }
     auto* db = db_manager.find_database(current_db_name);
-    if(!db){ current_query->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return;}
+    if(!db){ ui->show->appendPlainText("错误: 数据库 '" + current_db_name + "' 未找到。"); return;}
 
     QList<xhyindex> indexes = db->allIndexes();
     if(indexes.isEmpty()){
-        current_query->appendPlainText("数据库 '" + current_db_name + "' 中没有索引。");
+        ui->show->appendPlainText("数据库 '" + current_db_name + "' 中没有索引。");
         return;
     }
 
@@ -1330,12 +1445,12 @@ void MainWindow::handleShowIndexes(const QString& command) {
 
     if (!foundAny) {
         if (!filterTableName.isEmpty()) {
-            current_query->appendPlainText(QString("表 '%1' 上没有找到索引。").arg(filterTableName));
+            ui->show->appendPlainText(QString("表 '%1' 上没有找到索引。").arg(filterTableName));
         } else {
-            current_query->appendPlainText("当前数据库没有符合条件的索引。");
+            ui->show->appendPlainText("当前数据库没有符合条件的索引。");
         }
     } else {
-        current_query->appendPlainText(output);
+        ui->show->appendPlainText(output);
     }
 }
 
@@ -1502,7 +1617,7 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
             columnsPart = match.captured(2).trimmed();
             remainingPart = match.captured(3).trimmed();
         } else {
-            current_query->appendPlainText("错误: 无效的表级约束定义: " + constraint_str);
+            ui->show->appendPlainText("错误: 无效的表级约束定义: " + constraint_str);
             return;
         }
     }
@@ -1522,24 +1637,24 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
 
 
     if (constraintTypeStr == "PRIMARY_KEY") {
-        if (columns.isEmpty()) { current_query->appendPlainText("错误: PRIMARY KEY 约束必须指定列。"); return; }
+        if (columns.isEmpty()) { ui->show->appendPlainText("错误: PRIMARY KEY 约束必须指定列。"); return; }
         table.add_primary_key(columns);
-        current_query->appendPlainText(QString("表约束 '%1' (PRIMARY KEY on %2) 已添加。").arg(constraintName.isEmpty() ? "auto_pk" : constraintName, columns.join(",")));
+        ui->show->appendPlainText(QString("表约束 '%1' (PRIMARY KEY on %2) 已添加。").arg(constraintName.isEmpty() ? "auto_pk" : constraintName, columns.join(",")));
     } else if (constraintTypeStr == "UNIQUE") {
-        if (columns.isEmpty()) { current_query->appendPlainText("错误: UNIQUE 约束必须指定列。"); return; }
+        if (columns.isEmpty()) { ui->show->appendPlainText("错误: UNIQUE 约束必须指定列。"); return; }
         table.add_unique_constraint(columns, constraintName);
-        current_query->appendPlainText(QString("表约束 '%1' (UNIQUE on %2) 已添加。").arg(constraintName, columns.join(",")));
+        ui->show->appendPlainText(QString("表约束 '%1' (UNIQUE on %2) 已添加。").arg(constraintName, columns.join(",")));
     } else if (constraintTypeStr == "CHECK") {
-        if (columnsPart.isEmpty()) { current_query->appendPlainText("错误: CHECK 约束必须指定条件表达式 (in Klammern)."); return; }
+        if (columnsPart.isEmpty()) { ui->show->appendPlainText("错误: CHECK 约束必须指定条件表达式 (in Klammern)."); return; }
         table.add_check_constraint(columnsPart, constraintName);
-        current_query->appendPlainText(QString("表约束 '%1' (CHECK %2) 已添加。").arg(constraintName, columnsPart));
+        ui->show->appendPlainText(QString("表约束 '%1' (CHECK %2) 已添加。").arg(constraintName, columnsPart));
     } else if (constraintTypeStr == "FOREIGN_KEY") {
-        if (columns.isEmpty()) { current_query->appendPlainText("错误: FOREIGN KEY 约束必须指定列。"); return; }
+        if (columns.isEmpty()) { ui->show->appendPlainText("错误: FOREIGN KEY 约束必须指定列。"); return; }
 
         QRegularExpression fkRefRe(R"(REFERENCES\s+([\w_]+)\s*\(([\w_,\s]+)\))", QRegularExpression::CaseInsensitiveOption);
         QRegularExpressionMatch fkMatch = fkRefRe.match(remainingPart);
         if (!fkMatch.hasMatch()) {
-            current_query->appendPlainText("错误: FOREIGN KEY 约束缺少有效的 REFERENCES 子句。"); return;
+            ui->show->appendPlainText("错误: FOREIGN KEY 约束缺少有效的 REFERENCES 子句。"); return;
         }
         QString referencedTable = fkMatch.captured(1).trimmed();
         QStringList referencedColumnsList;
@@ -1548,26 +1663,26 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
         for(QString& rcol : referencedColumnsList) rcol = rcol.trimmed();
 
         if (columns.size() != referencedColumnsList.size()) {
-            current_query->appendPlainText("错误: FOREIGN KEY 列数量与引用的列数量不匹配。"); return;
+            ui->show->appendPlainText("错误: FOREIGN KEY 列数量与引用的列数量不匹配。"); return;
         }
         if(columns.size() == 1 && referencedColumnsList.size() == 1) {
             table.add_foreign_key(columns.first(), referencedTable, referencedColumnsList.first(), constraintName);
-            current_query->appendPlainText(QString("表约束 '%1' (FOREIGN KEY %2 REFERENCES %3(%4)) 已添加。")
+            ui->show->appendPlainText(QString("表约束 '%1' (FOREIGN KEY %2 REFERENCES %3(%4)) 已添加。")
                                           .arg(constraintName, columns.first(), referencedTable, referencedColumnsList.first()));
         } else {
-            current_query->appendPlainText(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。 (提示: 组合外键逻辑需要在xhytable中特别处理)")
+            ui->show->appendPlainText(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。 (提示: 组合外键逻辑需要在xhytable中特别处理)")
                                           .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
-            current_query->appendPlainText("警告: 此UI的组合外键逻辑仅为简化表示。");
+            ui->show->appendPlainText("警告: 此UI的组合外键逻辑仅为简化表示。");
         }
     } else {
-        current_query->appendPlainText("错误: 不支持的表约束类型: " + constraintTypeStr);
+        ui->show->appendPlainText("错误: 不支持的表约束类型: " + constraintTypeStr);
     }
 }
 
 void MainWindow::show_databases() {
     auto databases = db_manager.databases();
     if (databases.isEmpty()) {
-        current_query->appendPlainText("没有数据库。");
+        ui->show->appendPlainText("没有数据库。");
         return;
     }
     QSet<QString> uniqueNames;
@@ -1578,47 +1693,47 @@ void MainWindow::show_databases() {
     for (const QString& name : uniqueNames) {
         output += "  " + name + "\n";
     }
-    current_query->appendPlainText(output.trimmed());
+    ui->show->appendPlainText(output.trimmed());
 }
 
 void MainWindow::show_tables(const QString& db_name_input) {
     QString db_name = db_name_input.trimmed();
     if (db_name.isEmpty()) {
-        current_query->appendPlainText("错误: 未指定数据库名，或当前未选择数据库。");
+        ui->show->appendPlainText("错误: 未指定数据库名，或当前未选择数据库。");
         return;
     }
     xhydatabase* db = db_manager.find_database(db_name);
     if (!db) {
-        current_query->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
+        ui->show->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
     auto tables = db->tables();
     if (tables.isEmpty()) {
-        current_query->appendPlainText(QString("数据库 '%1' 中没有表。").arg(db_name));
+        ui->show->appendPlainText(QString("数据库 '%1' 中没有表。").arg(db_name));
         return;
     }
     QString output = QString("数据库 '%1' 中的表:\n").arg(db_name);
     for (const auto& table : tables) {
         output += "  " + table.name() + "\n";
     }
-    current_query->appendPlainText(output.trimmed());
+    ui->show->appendPlainText(output.trimmed());
 }
 
 void MainWindow::show_schema(const QString& db_name_input, const QString& table_name_input) {
     QString db_name = db_name_input.trimmed();
     QString table_name = table_name_input.trimmed();
 
-    if (db_name.isEmpty()) { current_query->appendPlainText("错误: 未指定数据库名。"); return; }
-    if (table_name.isEmpty()) { current_query->appendPlainText("错误: 未指定表名。"); return; }
+    if (db_name.isEmpty()) { ui->show->appendPlainText("错误: 未指定数据库名。"); return; }
+    if (table_name.isEmpty()) { ui->show->appendPlainText("错误: 未指定表名。"); return; }
 
     xhydatabase* db = db_manager.find_database(db_name);
     if (!db) {
-        current_query->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
+        ui->show->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
     xhytable* table = db->find_table(table_name);
     if (!table) {
-        current_query->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
+        ui->show->appendPlainText(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
         return;
     }
     QString output = QString("表 '%1.%2' 的结构:\n").arg(db_name, table_name);
@@ -1633,297 +1748,6 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
     if (!table->primaryKeys().isEmpty()) {
         output += "\nPRIMARY KEY: (" + table->primaryKeys().join(", ") + ")\n";
     }
-    current_query->appendPlainText(output.trimmed());
+    ui->show->appendPlainText(output.trimmed());
 }
 // ENDE von mainwindow.cpp
-//GUI
-
-void MainWindow::dataSearch(){
-    GUI_dbms = {
-        {
-            "数据库1",
-            {"student", "teacher"},  // 表
-            {"view1", "view2"},      // 视图
-            {"func1"},              // 函数
-            {"query1", "query2"}    // 查询
-        },
-        {
-            "数据库2",
-            {"order", "product"},    // 表
-            {"sales_view"},         // 视图
-            {"calculate_total"},    // 函数
-            {}      // 查询
-        }
-    };
-}
-
-void MainWindow::buildTree(){
-    ui->treeWidget->clear();
-
-    for (const Database &db : GUI_dbms) {
-        // 创建数据库节点（作为根的子节点）
-        QTreeWidgetItem *dbItem = new QTreeWidgetItem(ui->treeWidget);
-        dbItem->setText(0, db.database);
-
-        // 创建固定子节点：表、视图、函数、查询
-        QTreeWidgetItem *tablesItem = new QTreeWidgetItem(dbItem);
-        tablesItem->setText(0, "表");
-
-        QTreeWidgetItem *viewsItem = new QTreeWidgetItem(dbItem);
-        viewsItem->setText(0, "视图");
-
-        QTreeWidgetItem *functionsItem = new QTreeWidgetItem(dbItem);
-        functionsItem->setText(0, "函数");
-
-        QTreeWidgetItem *queriesItem = new QTreeWidgetItem(dbItem);
-        queriesItem->setText(0, "查询");
-        // 填充表
-        for (const QString &table : db.tables) {
-            QTreeWidgetItem *tableItem = new QTreeWidgetItem(tablesItem);
-            tableItem->setText(0, table);
-        }
-
-        // 填充视图
-        for (const QString &view : db.views) {
-            QTreeWidgetItem *viewItem = new QTreeWidgetItem(viewsItem);
-            viewItem->setText(0, view);
-        }
-
-        // 填充函数
-        for (const QString &func : db.functions) {
-            QTreeWidgetItem *funcItem = new QTreeWidgetItem(functionsItem);
-            funcItem->setText(0, func);
-        }
-
-        // 填充查询
-        for (const QString &query : db.queries) {
-            QTreeWidgetItem *queryItem = new QTreeWidgetItem(queriesItem);
-            queryItem->setText(0, query);
-        }
-    }
-
-}
-
-void MainWindow::updateList(QString currentDb){
-
-    tablelist->clear();
-    viewlist->clear();
-    functionlist->clear();
-    querylist->clear();
-
-    for (const Database &db : GUI_dbms) {
-
-        if(db.database == currentDb){
-            // 填充表
-            tablelist->addItems(db.tables);
-
-            // 填充视图
-            viewlist->addItems(db.views);
-
-            // 填充函数
-            functionlist->addItems(db.functions);
-
-            // 填充查询
-            querylist->addItems(db.queries);
-        }
-    }
-}
-
-void MainWindow::handleItemClicked(QTreeWidgetItem *item, int column)
-{
-    if (item) {
-        QString text = item->text(column);
-        qDebug() << "Clicked item: " << text;
-    }
-    if(item->parent() != nullptr){
-        if(item->text(0) == "表" || item->parent()->text(0) == "表"){
-            if(ui->tableButton->isEnabled()){
-                MainWindow::on_tableButton_released();
-            }
-
-        }else if(item->text(0) == "视图" || item->parent()->text(0) == "视图"){
-            if(ui->viewButton->isEnabled()){
-                MainWindow::on_viewButton_released();
-            }
-
-        }else if(item->text(0) == "函数" || item->parent()->text(0) == "函数"){
-            if(ui->functionButton->isEnabled()){
-                MainWindow::on_functionButton_released();
-            }
-
-        }else if(item->text(0) == "查询" || item->parent()->text(0) == "查询"){
-            if(ui->queryButton->isEnabled()){
-                MainWindow::on_queryButton_released();
-            }
-        }
-    }
-    while(item->parent() != nullptr){
-        item=item->parent();
-    }
-    if(current_GUI_Db == nullptr || item->text(0) != current_GUI_Db){
-        current_GUI_Db = item->text(0);
-        qDebug() << "数据库改变";
-
-        updateList(current_GUI_Db);
-    }
-}
-
-void MainWindow::handleItemDoubleClicked(QTreeWidgetItem *item, int column){
-    if(item->parent() == nullptr){
-
-
-        return;
-    }
-    QString parentText = item->parent()->text(0);
-    if(parentText == "表"){
-        tableShow *tableshow = new tableShow;
-        ui->tabWidget->addTab(tableshow,item->text(0)+" @"+current_GUI_Db);
-        //tableshow->
-
-    }else if(parentText == "视图"){
-
-    }else if(parentText == "函数"){
-
-    }else if(parentText == "查询"){
-
-    }
-}
-
-void MainWindow::handleString(const QString& text, queryWidget* query){
-    current_query = query;
-    QString input = text;
-    QStringList commands = SQLParser::parseMultiLineSQL(input); // SQLParser::静态调用
-
-    current_query->clear();
-
-    for (const QString& command_const : commands) {
-        QString trimmedCmd = command_const.trimmed();
-        if (!trimmedCmd.isEmpty() && trimmedCmd.endsWith(';')) {
-            current_query->appendPlainText("> " + trimmedCmd);
-            execute_command(trimmedCmd);
-            current_query->appendPlainText("");
-        } else if (!trimmedCmd.isEmpty()){
-            current_query->appendPlainText("! 忽略未以分号结尾的语句: " + trimmedCmd);
-        }
-    }
-    QString remaining = input.trimmed().section(';', -1).trimmed();
-    if(!remaining.isEmpty()) {
-        bool alreadyProcessedOrEmpty = commands.isEmpty();
-        if (!commands.isEmpty()) {
-            QString lastProcessedCmdFull = commands.last().trimmed();
-            QString lastProcessedCmdNoSemi = lastProcessedCmdFull;
-            if (lastProcessedCmdNoSemi.endsWith(';')) {
-                lastProcessedCmdNoSemi.chop(1);
-            }
-            if (lastProcessedCmdNoSemi == remaining || lastProcessedCmdFull == remaining) {
-                alreadyProcessedOrEmpty = true;
-            }
-        }
-        if (!alreadyProcessedOrEmpty) {
-            bool isPartOfProcessed = false;
-            for(const QString& cmd : commands) {
-                if (cmd.trimmed() == remaining + ";" || cmd.trimmed() == remaining) {
-                    isPartOfProcessed = true;
-                    break;
-                }
-            }
-            if (!isPartOfProcessed) {
-                current_query->appendPlainText("错误: 检测到未完成的SQL语句（末尾缺少分号）: " + remaining);
-            }
-        }
-    }
-}
-
-void MainWindow::on_addQuery_released()
-{
-    queryWidget *query = new queryWidget;
-    ui->tabWidget->addTab(query,"新建查询");
-    connect(query,&queryWidget::sendString,[=](const QString& text){
-        handleString(text,query);
-    });
-}
-
-void MainWindow::on_tableButton_released()
-{
-    ui->tableButton->setEnabled(false);
-    ui->viewButton->setEnabled(true);
-    ui->functionButton->setEnabled(true);
-    ui->queryButton->setEnabled(true);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,tablelist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-void MainWindow::on_viewButton_released()
-{
-    ui->tableButton->setEnabled(true);
-    ui->viewButton->setEnabled(false);
-    ui->functionButton->setEnabled(true);
-    ui->queryButton->setEnabled(true);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,viewlist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-void MainWindow::on_functionButton_released()
-{
-    ui->tableButton->setEnabled(true);
-    ui->viewButton->setEnabled(true);
-    ui->functionButton->setEnabled(false);
-    ui->queryButton->setEnabled(true);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,functionlist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-void MainWindow::on_queryButton_released()
-{
-    ui->tableButton->setEnabled(true);
-    ui->viewButton->setEnabled(true);
-    ui->functionButton->setEnabled(true);
-    ui->queryButton->setEnabled(false);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,querylist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-
-void MainWindow::on_tabWidget_tabCloseRequested(int index)
-{
-    QWidget* widget = ui->tabWidget->widget(index);
-    ui->tabWidget->removeTab(index);
-    widget->deleteLater();
-}
-

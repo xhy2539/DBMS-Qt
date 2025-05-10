@@ -72,35 +72,25 @@ bool xhydbmanager::createdatabase(const QString& dbname) {
 
 bool xhydbmanager::dropdatabase(const QString& dbname) {
     for (auto it = m_databases.begin(); it != m_databases.end(); ++it) {
-        if (it->name().compare(dbname, Qt::CaseInsensitive) == 0) { // 使用 compare 进行不区分大小写的比较
+        if (it->name().toLower() == dbname.toLower()) {
             // 删除数据库目录
-            QString dbPath = QString("%1/data/%2").arg(m_dataDir, dbname); // m_dataDir 是您的根数据目录
-            QDir db_dir(dbPath);
+            QString dbPath = QString("%1/data/%2").arg(m_dataDir, dbname);
+              QDir db_dir(dbPath);
             if (db_dir.exists()) {
-                if (!db_dir.removeRecursively()) { // 检查删除是否成功
-                    qWarning() << "错误: 无法完全删除数据库目录: " << dbPath;
-                    return false; // 如果目录删除失败，操作也失败
-                }
+                db_dir.removeRecursively();
             }
 
-            // 从内存列表中移除
-            it = m_databases.erase(it); // erase 返回下一个有效迭代器
-
-            if (current_database.compare(dbname, Qt::CaseInsensitive) == 0) {
+            m_databases.erase(it);
+            if (current_database.toLower() == dbname.toLower()) {
                 current_database.clear();
             }
-            qDebug() << "数据库已删除 (包括内存记录):" << dbname;
-
-            // TODO: 更新 ruanko.db (如果它跟踪所有数据库的元数据)
-            // 这部分逻辑比较复杂，需要读取 ruanko.db，移除对应的 DatabaseBlock，然后重写文件。
-            // 或者标记为已删除。暂时跳过这一步，但这是持久化所必需的。
-
+            qDebug() << "Database dropped:" << dbname;
             return true;
         }
     }
-    qWarning() << "错误: 尝试删除的数据库 '" << dbname << "' 在内存中未找到。";
     return false;
 }
+
 bool xhydbmanager::use_database(const QString& dbname) {
     for (const auto& db : m_databases) {
         if (db.name().toLower() == dbname.toLower()) {
@@ -164,21 +154,31 @@ void xhydbmanager::rollbackTransaction() {
 bool xhydbmanager::add_column(const QString& database_name, const QString& table_name, const xhyfield& field) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
+
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
-    if (table->has_field(field.name())) return false;
-    table->addfield(field); // 修正: add_field -> addfield
-    save_table_to_file(database_name, table_name, table); // 假设保存表结构
+
+    if (table->has_field(field.name())) {
+        return false; // 字段已存在
+    }
+
+    table->add_field(field);
+    // 保存更改到文件或其他存储中
     return true;
 }
-
 bool xhydbmanager::drop_column(const QString& database_name, const QString& table_name, const QString& field_name) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
+
     xhytable* table = db->find_table(table_name);
-    if (!table || !table->has_field(field_name)) return false;
-    table->remove_field(field_name); // 现在应该能找到这个方法
-    save_table_to_file(database_name, table_name, table); // 假设保存表结构
+    if (!table) return false;
+
+    if (!table->has_field(field_name)) {
+        return false; // 字段不存在
+    }
+
+    table->remove_field(field_name);
+    // 保存更改到文件或其他存储中
     return true;
 }
 
@@ -222,101 +222,76 @@ xhyfield::datatype parseDataType(const QString& type_str, int& size) {
 }
 
 bool xhydbmanager::alter_column(const QString& database_name, const QString& table_name,
-                                const QString& old_field_name, const xhyfield& new_field) {
+                  const QString& old_field_name, const xhyfield& new_field) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-    xhytable* table = db->find_table(table_name);
-    if (!table || !table->get_field(old_field_name)) return false;
-    if (old_field_name.compare(new_field.name(), Qt::CaseInsensitive) != 0 && table->has_field(new_field.name())) {
-        qWarning() << "ALTER COLUMN 失败: 新列名 " << new_field.name() << " 已存在。";
-        return false;
-    }
-    table->remove_field(old_field_name); // 现在应该能找到
-    table->addfield(new_field);      // 修正: add_field -> addfield
-    save_table_to_file(database_name, table_name, table);
-    return true;
-}
 
-
-bool xhydbmanager::add_constraint(const QString& database_name, const QString& table_name, const QString& field_name, const QString& constraint_str) {
-    xhydatabase* db = find_database(database_name);
-    if (!db) return false;
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
+
+    // 先删除旧字段
+    table->remove_field(old_field_name);
+    // 添加新字段
+    table->add_field(new_field);
+
+    return true;
+}
+bool xhydbmanager::add_constraint(const QString& database_name, const QString& table_name, const QString& field_name, const QString& constraint) {
+    xhydatabase* db = find_database(database_name);
+    if (!db) return false;
+
+    xhytable* table = db->find_table(table_name);
+    if (!table) return false;
+
+    // 获取字段
     const xhyfield* old_field = table->get_field(field_name);
     if (!old_field) return false;
 
+    // 创建新字段并添加约束
     QStringList constraints = old_field->constraints();
-    if (!constraints.contains(constraint_str, Qt::CaseInsensitive)) { // 避免重复添加
-        constraints.append(constraint_str);
-        xhyfield new_field_with_constraint(old_field->name(), old_field->type(), constraints);
-        // 替换字段定义 (这是一个简化的 alter field，更复杂的可能需要新建表复制数据)
-        table->remove_field(field_name); // 现在应该能找到
-        table->addfield(new_field_with_constraint);
-        save_table_to_file(database_name, table_name, table);
-        return true;
-    }
-    return false; // 约束已存在或操作未执行
-}
+    constraints.append(constraint);
+    xhyfield new_field(old_field->name(), old_field->type(), constraints);
 
-bool xhydbmanager::drop_constraint(const QString& database_name, const QString& table_name, const QString& constraint_to_drop_name_or_text) {
-    // 这个函数逻辑比较复杂，取决于约束是如何存储和识别的。
-    // 假设 constraint_to_drop_name_or_text 是约束的文本内容，如 "NOT_NULL" 或 "UNIQUE"
-    // 并且假设约束是字段级的。表级约束的移除会更复杂。
+    // 替换原字段
+    table->remove_field(field_name);
+    table->addfield(new_field);
+
+    return true;
+}
+bool xhydbmanager::drop_constraint(const QString& database_name, const QString& table_name, const QString& constraint_name) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
+
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
 
-    bool changed = false;
-    for (const xhyfield& current_field : table->fields()) { // 需要迭代字段的副本或用索引，因为我们可能修改它
-        QStringList constraints = current_field.constraints();
-        int initial_size = constraints.size();
-        constraints.removeAll(constraint_to_drop_name_or_text); // Qt::CaseInsensitive?
-
-        if (constraints.size() < initial_size) { // 如果确实移除了约束
-            xhyfield modified_field(current_field.name(), current_field.type(), constraints);
-            table->remove_field(current_field.name()); // 移除旧字段定义
-            table->addfield(modified_field);       // 添加修改后的字段定义
-            changed = true;
-            // 注意: 如果一个字段有多个相同的约束文本，removeAll会都移除。
-            // 如果只想移除一个，需要更精确的逻辑。
+    // 假设我们能通过约束名称找到对应的字段
+    for (auto& field : table->fields()) {
+        auto constraints = field.constraints();
+        if (constraints.contains(constraint_name)) {
+            constraints.removeOne(constraint_name);
+            xhyfield new_field(field.name(), field.type(), constraints);
+            table->remove_field(field.name());
+            table->addfield(new_field);
+            return true; // 删除成功
         }
     }
-    if (changed) {
-        save_table_to_file(database_name, table_name, table);
-    }
-    // TODO: 处理表级约束的移除 (如果 constraint_to_drop_name_or_text 是一个约束名)
-    if(!changed) qWarning() << "未找到或移除约束:" << constraint_to_drop_name_or_text << "在表" << table_name;
-    return changed;
+    return false; // 未找到约束
 }
-
 bool xhydbmanager::rename_column(const QString& database_name, const QString& table_name, const QString& old_column_name, const QString& new_column_name) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
+
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
+
     const xhyfield* old_field = table->get_field(old_column_name);
     if (!old_field) return false;
-    if (table->has_field(new_column_name)) {
-        qWarning() << "重命名列失败：新列名 " << new_column_name << " 已存在。";
-        return false;
-    }
 
-    xhyfield new_field_renamed(new_column_name, old_field->type(), old_field->constraints() /*, any other properties like enum values */);
-    // TODO: 如果 xhyfield 有其他属性（如枚举值列表），也需要从 old_field 复制到 new_field_renamed
-
+    xhyfield new_field(new_column_name, old_field->type(), old_field->constraints());
     table->remove_field(old_column_name);
-    table->addfield(new_field_renamed);
+    table->addfield(new_field);
 
-    // TODO: 非常重要! 还需要更新所有记录中该字段的键名。
-    // 这通常意味着遍历 m_records 和 m_tempRecords，对每个 xhyrecord：
-    // QString value = record.value(old_column_name);
-    // record.removeValue(old_column_name);
-    // record.insert(new_column_name, value);
-    // 这个逻辑应该在 xhytable::rename_column 方法中（如果创建该方法）或此处直接操作记录
-
-    save_table_to_file(database_name, table_name, table);
     return true;
 }
 
@@ -535,7 +510,6 @@ void xhydbmanager::load_databases_from_files() {
                                 recordInputStream >> floatValue;
                                 value = QString::number(floatValue);
                                 break;
-                            case xhyfield::TEXT:
                             case xhyfield::VARCHAR:
                             case xhyfield::CHAR: {
                                 QByteArray strBytes;
@@ -675,7 +649,6 @@ void xhydbmanager::save_table_records_file(const QString& filePath, const xhytab
             case xhyfield::DOUBLE:
                 recordStream << value.toDouble();
                 break;
-            case xhyfield::TEXT:
             case xhyfield::CHAR:
             case xhyfield::VARCHAR: {
                 // 处理字符串类型，UTF-8编码

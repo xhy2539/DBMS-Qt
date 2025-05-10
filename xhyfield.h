@@ -19,6 +19,7 @@ public:
              const QStringList& constraints = {});
     void set_enum_values(const QStringList& values);
     QStringList enum_values() const;
+
     // 字段属性
     QString name() const;
     datatype type() const;
@@ -32,10 +33,9 @@ public:
 
     // 数据验证
     bool validateValue(const QString& value) const;
-
 private:
      int m_order = 0;
-     QStringList m_enum_values;
+     QStringList m_enumValues;
     QString m_name;
     datatype m_type;
     QStringList m_constraints;

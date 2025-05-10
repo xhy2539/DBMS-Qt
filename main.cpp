@@ -13,6 +13,5 @@ int main(int argc, char *argv[])
         w.show();
         return a.exec();
     }
-
     return 0;  // 如果登录失败或取消，直接退出程序
 }

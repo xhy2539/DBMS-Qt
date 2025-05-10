@@ -120,43 +120,91 @@ QList<xhydatabase> xhydbmanager::databases() const {
     return m_databases;
 }
 
+// In xhydbmanager.cpp
 bool xhydbmanager::beginTransaction() {
-    if (m_inTransaction) return false; // 如果已经在事务中，则返回失败
-    m_inTransaction = true; // 更新事务状态
+    if (m_inTransaction) {
+        qDebug() << "Manager is already in a transaction.";
+        return false;
+    }
+
+    if (current_database.isEmpty()) {
+        qWarning() << "Cannot begin transaction: No database selected.";
+        return false;
+    }
+    xhydatabase* db = find_database(current_database);
+    if (!db) {
+        qWarning() << "Cannot begin transaction: Current database" << current_database << "not found.";
+        return false;
+    }
+
+    db->beginTransaction(); // <--- 新增：让数据库对象也开始事务
+
+    m_inTransaction = true;
     qDebug() << "Transaction started for database:" << current_database;
     return true;
 }
+// In xhydbmanager.cpp
 bool xhydbmanager::commitTransaction() {
-    if (!m_inTransaction) return false;
+    if (!m_inTransaction) {
+        qDebug() << "Manager is not in a transaction, cannot commit.";
+        return false;
+    }
 
-    // 保存当前数据库的所有表到文件
+    bool success = true;
     if (!current_database.isEmpty()) {
         xhydatabase* db = find_database(current_database);
         if (db) {
-            for (const xhytable& table : db->tables()) {
-                save_table_to_file(current_database, table.name(), &table);
+            db->commit(); // <--- 新增：让数据库对象也提交事务
+
+            // 持久化已提交的数据
+            for (const xhytable& table : db->tables()) { // db->tables() 现在返回的是已提交状态的表
+                // save_table_to_file 应该只在最外层事务成功提交后执行
+                // 如果 db->commit() 内部有复杂逻辑可能失败，需要更细致的错误处理
             }
+            // 实际的文件保存应该在所有内存操作成功后进行
+            if (success) { // 假设 db->commit() 总是成功，或者能指示成功
+                for (const xhytable& table : db->tables()) {
+                    save_table_to_file(current_database, table.name(), &table);
+                }
+            }
+
+        } else {
+            qWarning() << "Commit failed: Current database" << current_database << "not found.";
+            success = false;
         }
+    } else {
+        qWarning() << "Commit failed: No database selected.";
+        success = false;
     }
 
-    m_inTransaction = false;
-    qDebug() << "Transaction committed for database:" << current_database;
-    return true;
+    if(success) {
+        m_tempTables.clear(); // 清理管理器层面的临时表（用于DDL）
+        m_inTransaction = false;
+        qDebug() << "Transaction committed for database:" << current_database;
+        return true;
+    } else {
+        // 如果提交过程中（例如db->commit()或文件保存前）发生错误，
+        // 可能需要触发一次内部回滚db->rollback()以保持内存一致性，
+        // 尽管外层事务标志m_inTransaction可能仍需根据策略设置为false。
+        // 这是一个复杂点，取决于您希望如何处理提交阶段的失败。
+        // 为简单起见，目前假设db->commit()成功。
+        qDebug() << "Transaction commit failed. State might be inconsistent if db->commit() partially succeeded.";
+            // m_inTransaction = false; // 即使提交失败，也可能需要结束事务状态
+        return false;
+    }
 }
-
+// In xhydbmanager.cpp
 void xhydbmanager::rollbackTransaction() {
     if (m_inTransaction) {
-        // 恢复到事务开始前的状态
         if (!current_database.isEmpty()) {
             xhydatabase* db = find_database(current_database);
             if (db) {
-                db->clearTables(); // 清空当前表数据
-                for (const auto& tempTable : m_tempTables) {
-                    db->addTable(tempTable); // 直接使用对象，而不是解引用
-                }
+                db->rollback(); // <--- 修改：调用 xhydatabase 的 rollback 方法
             }
         }
-        m_tempTables.clear(); // 清空临时表
+        // m_tempTables 是为管理器层面的 DDL 事务准备的，例如 CREATE TABLE 后 ROLLBACK
+        // 如果您的事务模型支持这种混合操作，清空它是合理的。
+        m_tempTables.clear();
         m_inTransaction = false;
         qDebug() << "Transaction rolled back for database:" << current_database;
     }

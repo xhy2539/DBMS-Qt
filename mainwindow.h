@@ -8,6 +8,23 @@
 #include "userfilemanager.h"
 #include <QVariant>
 #include <QStringView>
+#include <QTreeWidgetItem>
+#include <QFile>
+#include <QDir>
+#include "querywidget.h"
+#include "popupwidget.h"
+#include "tablelist.h"
+#include "viewlist.h"
+#include "functionlist.h"
+#include "querylist.h"
+
+struct Database{
+    QString database;
+    QStringList tables;
+    QStringList views;
+    QStringList functions;
+    QStringList queries;
+};
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -45,7 +62,19 @@ public:
 
     QPair<int, QString> findLowestPrecedenceOperator(const QString &expr, const QStringList &operatorsInPrecedenceOrder);
 private slots:
-    void on_run_clicked();
+    // void on_run_clicked();
+    void on_addQuery_released();
+
+    void on_tableButton_released();
+
+    void on_viewButton_released();
+
+    void on_functionButton_released();
+
+    void on_queryButton_released();
+
+    void on_tabWidget_tabCloseRequested(int index);
+
 
 private:
     void execute_command(const QString& command);
@@ -66,5 +95,24 @@ private:
     int findBalancedOperatorPos(const QString& text, const QStringList& operatorsToFind, int startPos = 0);
     ConditionNode parseSubExpression(QStringView expressionView);
     ComparisonDetails parseComparisonDetails(const QString& field, const QString& op, const QString& valuePart);
+
+    //GUI
+    popupWidget *popup;
+    QList<Database> GUI_dbms;
+    QString current_GUI_Db = nullptr;
+
+    QTabBar *tabBar;
+    queryWidget *current_query;
+    tableList *tablelist;
+    viewList *viewlist;
+    functionList *functionlist;
+    queryList *querylist;
+
+    void dataSearch();
+    void buildTree();
+    void updateList(QString currentDb);
+    void handleItemClicked(QTreeWidgetItem *item, int column);
+    void handleItemDoubleClicked(QTreeWidgetItem *item, int column);
+    void handleString(const QString& text, queryWidget* querywidget);
 };
 #endif // MAINWINDOW_H

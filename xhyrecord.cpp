@@ -17,7 +17,3 @@ QMap<QString, QString> xhyrecord::allValues() const { // 新增实现
 void xhyrecord::clear() { // 新增实现
     m_data.clear();
 }
-
-bool xhyrecord::hasField(const QString& field) const { // 新增实现
-    return m_data.contains(field);
-}

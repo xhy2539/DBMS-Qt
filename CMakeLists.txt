@@ -32,8 +32,15 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         ConditionNode.h
         logindialog.h logindialog.cpp logindialog.ui
         userfilemanager.h userfilemanager.cpp
-        xhyindex.cpp
-        xhyindex.h
+        xhyindex.cpp xhyindex.h
+        querywidget.h querywidget.cpp querywidget.ui
+        popupwidget.h popupwidget.cpp popupwidget.ui
+        tablelist.h tablelist.cpp tablelist.ui
+        viewlist.h viewlist.cpp viewlist.ui
+        functionlist.h functionlist.cpp functionlist.ui
+        querylist.h querylist.cpp querylist.ui
+        tableshow.h tableshow.cpp tableshow.ui
+        tabledesign.h tabledesign.cpp tabledesign.ui
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET DBMS APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR

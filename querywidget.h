@@ -14,9 +14,15 @@ class queryWidget : public QWidget
 public:
     explicit queryWidget(QWidget *parent = nullptr);
     ~queryWidget();
+    void clear();
+    void setPlainText(const QString& text);
+    void appendPlainText(const QString& text);
+signals:
+    void sendString(const QString& text);
 
 private:
     Ui::queryWidget *ui;
+
 };
 
 #endif // QUERYWIDGET_H

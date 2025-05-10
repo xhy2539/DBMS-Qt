@@ -1,19 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>queryWidget</class>
- <widget class="QWidget" name="queryWidget">
+ <class>tableDesign</class>
+ <widget class="QWidget" name="tableDesign">
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>594</width>
-    <height>399</height>
+    <width>400</width>
+    <height>300</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Form</string>
   </property>
-  <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,1,1">
+  <layout class="QVBoxLayout" name="verticalLayout">
    <property name="spacing">
     <number>0</number>
    </property>
@@ -30,32 +30,19 @@
     <number>0</number>
    </property>
    <item>
-    <widget class="Line" name="line">
-     <property name="lineWidth">
-      <number>1</number>
-     </property>
-     <property name="orientation">
-      <enum>Qt::Orientation::Horizontal</enum>
-     </property>
-    </widget>
-   </item>
-   <item>
-    <layout class="QHBoxLayout" name="horizontalLayout_5">
+    <layout class="QHBoxLayout" name="horizontalLayout_4">
      <property name="spacing">
       <number>0</number>
      </property>
-     <property name="bottomMargin">
-      <number>0</number>
-     </property>
      <item>
-      <widget class="QPushButton" name="run">
+      <widget class="QPushButton" name="pushButton_9">
        <property name="text">
-        <string>运行</string>
+        <string>PushButton</string>
        </property>
       </widget>
      </item>
      <item>
-      <spacer name="horizontalSpacer_4">
+      <spacer name="horizontalSpacer_3">
        <property name="orientation">
         <enum>Qt::Orientation::Horizontal</enum>
        </property>
@@ -70,10 +57,21 @@
     </layout>
    </item>
    <item>
-    <widget class="QTextEdit" name="putin"/>
-   </item>
-   <item>
-    <widget class="QPlainTextEdit" name="show"/>
+    <widget class="QTabWidget" name="tabWidget">
+     <property name="currentIndex">
+      <number>0</number>
+     </property>
+     <widget class="QWidget" name="tab">
+      <attribute name="title">
+       <string>Tab 1</string>
+      </attribute>
+     </widget>
+     <widget class="QWidget" name="tab_2">
+      <attribute name="title">
+       <string>Tab 2</string>
+      </attribute>
+     </widget>
+    </widget>
    </item>
   </layout>
  </widget>

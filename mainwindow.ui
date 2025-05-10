@@ -9,8 +9,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>714</width>
-    <height>490</height>
+    <width>892</width>
+    <height>496</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -339,6 +339,16 @@
    </layout>
   </widget>
   <widget class="QStatusBar" name="statusBar"/>
+  <widget class="QMenuBar" name="menuBar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>892</width>
+     <height>17</height>
+    </rect>
+   </property>
+  </widget>
   <action name="action111">
    <property name="text">
     <string>111</string>
@@ -347,6 +357,11 @@
   <action name="action1">
    <property name="text">
     <string>数据库</string>
+   </property>
+  </action>
+  <action name="action111_2">
+   <property name="text">
+    <string>111</string>
    </property>
   </action>
  </widget>

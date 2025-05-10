@@ -506,27 +506,45 @@ void xhydbmanager::save_database_to_file(const QString& dbname) {
 
 void xhydbmanager::load_databases_from_files() {
     QDir data_dir(QString("%1/data").arg(m_dataDir));
+    if (!data_dir.exists()) {
+        qWarning() << "[LOAD_DB] Data directory " << data_dir.absolutePath() << " does not exist. No databases to load.";
+        return;
+    }
     QStringList db_dirs = data_dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
 
+    m_databases.clear(); // Clear in-memory list before loading
+
     for (const QString& dbname : db_dirs) {
-        xhydatabase db(dbname);
-        QDir db_dir(data_dir.filePath(dbname));
-        QStringList table_files = db_dir.entryList(QStringList() << "*.tdf", QDir::Files);
+        xhydatabase db(dbname); // In-memory database object
+        QDir db_dir_path(data_dir.filePath(dbname)); // Path to this database's directory
+        QStringList tdf_files = db_dir_path.entryList(QStringList() << "*.tdf", QDir::Files);
 
-        for (const QString& table_file : table_files) {
-            QString table_name = table_file.left(table_file.length() - 4); // 去掉 .tdf 后缀
-            QFile tdfFile(db_dir.filePath(table_file));
+        qDebug() << "[LOAD_DB] Loading database from directory:" << db_dir_path.path();
 
+        for (const QString& tdf_filename : tdf_files) {
+            QString current_table_name = tdf_filename.left(tdf_filename.length() - 4); // "tablename.tdf" -> "tablename"
+            qDebug() << "  [LOAD_DB] Attempting to load table:" << current_table_name;
+            xhytable table(current_table_name); // In-memory table object
+            bool tdf_load_successful = true; // Flag for TDF loading status
+
+            // --- Load Table Definition (.tdf) ---
+            QFile tdfFile(db_dir_path.filePath(tdf_filename));
             if (tdfFile.open(QIODevice::ReadOnly)) {
-                QDataStream in(&tdfFile);
-                in.setVersion(QDataStream::Qt_5_15);
+                QDataStream tdf_in_stream(&tdfFile);
+                tdf_in_stream.setVersion(QDataStream::Qt_5_15);
 
-                xhytable table(table_name);
-                while (!in.atEnd()) {
+                while (!tdf_in_stream.atEnd()) {
                     FieldBlock fb;
-                    in.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
+                    int bytesRead = tdf_in_stream.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
 
-                    QString name(fb.name);
+                    if (bytesRead == 0 && tdf_in_stream.atEnd()) break; // Clean end of file
+                    if (bytesRead < static_cast<int>(sizeof(FieldBlock))) {
+                        qWarning() << "  [LOAD_DB] TDF read error for table '" << current_table_name << "'. Expected " << sizeof(FieldBlock) << ", got " << bytesRead << ". Stream status: " << tdf_in_stream.status();
+                        tdf_load_successful = false; // Mark TDF load as failed
+                        break; // Exit TDF field reading loop
+                    }
+
+                    QString field_name_str = QString::fromUtf8(fb.name, strnlen(fb.name, sizeof(fb.name)));
                     xhyfield::datatype type = static_cast<xhyfield::datatype>(fb.type);
                     QStringList constraints;
 
@@ -534,88 +552,149 @@ void xhydbmanager::load_databases_from_files() {
                     if (fb.integrities & 0x02) constraints.append("NOT_NULL");
                     if (fb.integrities & 0x04) constraints.append("UNIQUE");
 
-                    table.addfield(xhyfield(name, type, constraints));
-                }
-
-                // 加载记录文件 (.trd)
-                QString trdFilePath = QString("%1/%2.trd").arg(db_dir.path(), table_name);
-                QFile trdFile(trdFilePath);
-                if (trdFile.open(QIODevice::ReadOnly)) {
-                    QDataStream recordStream(&trdFile);
-                    recordStream.setVersion(QDataStream::Qt_5_15);
-
-                    while (!recordStream.atEnd()) {
-                        quint32 recordSize;
-                        recordStream >> recordSize;
-
-                        QByteArray recordData(recordSize, 0);
-                        recordStream.readRawData(recordData.data(), recordSize);
-
-                        QDataStream recordInputStream(recordData);
-                        recordInputStream.setVersion(QDataStream::Qt_5_15);
-
-                        xhyrecord record;
-                        for (const auto& field : table.fields()) {
-                            QString value;
-                            switch (field.type()) {
-                            case xhyfield::INT:
-                                qint32 intValue;
-                                recordInputStream >> intValue;
-                                value = QString::number(intValue);
-                                break;
-                            case xhyfield::FLOAT:
-                                float floatValue;
-                                recordInputStream >> floatValue;
-                                value = QString::number(floatValue);
-                                break;
-                            case xhyfield::VARCHAR:
-                            case xhyfield::CHAR: {
-                                QByteArray strBytes;
-                                recordInputStream >> strBytes;
-                                value = QString::fromUtf8(strBytes);
-                                break;
-                            }
-                            case xhyfield::DATE: {
-                                QDate date;
-                                recordInputStream >> date;
-                                value = date.toString("yyyy-MM-dd");
-                                break;
-                            }
-                            case xhyfield::DATETIME: {
-                                QDateTime datetime;
-                                recordInputStream >> datetime;
-                                value = datetime.toString("yyyy-MM-dd HH:mm:ss");
-                                break;
-                            }
-                            case xhyfield::BOOL: {
-                                bool boolValue;
-                                recordInputStream >> boolValue;
-                                value = boolValue ? "1" : "0";
-                                break;
-                            }
-                            default:
-                                qWarning() << "Unsupported data type for field:" << field.name();
-                                break;
-                            }
-                            record.insert(field.name(), value);
+                    if (type == xhyfield::CHAR || type == xhyfield::VARCHAR) {
+                        if (fb.param > 0) {
+                            constraints.append(QString("SIZE(%1)").arg(fb.param));
+                        } else if (type == xhyfield::CHAR) {
+                            constraints.append(QString("SIZE(1)"));
                         }
-                        table.addrecord(record);
+                    } else if (type == xhyfield::DECIMAL) {
+                        if (fb.param > 0) {
+                            constraints.append(QString("PRECISION(%1)").arg(fb.param));
+                            constraints.append(QString("SCALE(%1)").arg(fb.size));
+                        }
                     }
-                } else {
-                    qWarning() << "Failed to open TRD file:" << trdFilePath;
-                }
+                    qDebug() << "    [LOAD_DB_TDF] Loaded field def: '" << field_name_str << "' TypeID:" << static_cast<int>(type) << " Param:" << fb.param << " Size:" << fb.size << " Constraints:" << constraints.join(",");
 
-                db.createtable(table);
+                    xhyfield new_field(field_name_str, type, constraints);
+                    table.addfield(new_field);
+                } // End while TDF fields
+                tdfFile.close();
             } else {
-                qWarning() << "Failed to open TDF file:" << tdfFile.fileName();
+                qWarning() << "  [LOAD_DB] Failed to open TDF file:" << tdfFile.fileName() << ". Skipping table.";
+                tdf_load_successful = false; // Mark TDF load as failed
             }
-        }
 
-        m_databases.append(db);
-    }
+            if (!tdf_load_successful) {
+                qWarning() << "  [LOAD_DB] Skipping TRD load for table '" << current_table_name << "' due to TDF load error.";
+                continue; // Skip to the next TDF file (next table)
+            }
+
+            if (table.fields().isEmpty()) {
+                qWarning() << "  [LOAD_DB] Table '" << current_table_name << "' has no fields defined after TDF load. Skipping TRD load.";
+                // Potentially add this partially loaded (empty) table to db object if that's desired,
+                // or skip adding it entirely. For now, we'll add it if TDF was 'successful' but resulted in no fields.
+                // db.addTable(table); // Or decide not to add it
+                continue; // Skip to next TDF file
+            }
+
+
+            // --- Load Record Data (.trd) ---
+            QString trdFilePath = db_dir_path.filePath(current_table_name + ".trd");
+            QFile trdFile(trdFilePath);
+            bool trd_processing_error_occurred = false; // Flag for critical errors within TRD processing
+
+            if (trdFile.exists() && trdFile.open(QIODevice::ReadOnly)) {
+                QDataStream record_file_stream(&trdFile);
+                record_file_stream.setVersion(QDataStream::Qt_5_15);
+                qDebug() << "    [LOAD_DB_TRD] Loading TRD for table:" << current_table_name << "from" << trdFilePath;
+
+                while (!record_file_stream.atEnd()) {
+                    if (trd_processing_error_occurred) break; // Stop if a critical error happened in a previous record
+
+                    quint32 record_total_size_from_file;
+                    record_file_stream >> record_total_size_from_file;
+                    if (record_file_stream.status() != QDataStream::Ok) {
+                        if (!record_file_stream.atEnd())
+                            qWarning() << "    [LOAD_DB_TRD] Failed to read record size for '" << current_table_name << "'. Status: " << record_file_stream.status();
+                        break;
+                    }
+
+                    QByteArray record_data_buffer(record_total_size_from_file, Qt::Uninitialized);
+                    int bytes_actually_read = record_file_stream.readRawData(record_data_buffer.data(), record_total_size_from_file);
+
+                    if (bytes_actually_read < static_cast<int>(record_total_size_from_file)) {
+                        qWarning() << "    [LOAD_DB_TRD] Failed to read full record data for '" << current_table_name
+                                   << "'. Expected: " << record_total_size_from_file << ", Got: " << bytes_actually_read
+                                   << ". Stream status: " << record_file_stream.status();
+                        break;
+                    }
+
+                    QDataStream field_parse_stream(record_data_buffer);
+                    field_parse_stream.setVersion(QDataStream::Qt_5_15);
+                    xhyrecord new_loaded_record;
+
+                    for (const auto& field_def : table.fields()) {
+                        QString value_to_insert_in_record;
+                        quint8 is_null_marker;
+
+                        field_parse_stream >> is_null_marker;
+                        if (field_parse_stream.status() != QDataStream::Ok) {
+                            qWarning() << "    [LOAD_DB_TRD] CRITICAL: Failed to read null marker for field '" << field_def.name() << "' in table '" << current_table_name << "'. Aborting TRD load for this table.";
+                            trd_processing_error_occurred = true; // Set flag
+                            break; // Exit field loop for this record
+                        }
+
+                        if (is_null_marker == 0) { // Value IS NOT NULL
+                            QDataStream::Status field_read_status = QDataStream::Ok;
+                            switch (field_def.type()) {
+                            case xhyfield::TINYINT:  { qint8 val;     field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::SMALLINT: { qint16 val;    field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::INT:      { qint32 val;    field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::BIGINT:   { qlonglong val; field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::FLOAT:    { float val;     field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::DOUBLE:   { double val;    field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::DECIMAL:
+                            case xhyfield::CHAR:
+                            case xhyfield::VARCHAR:
+                            case xhyfield::TEXT:
+                            case xhyfield::ENUM:     { QByteArray strBytes; field_parse_stream >> strBytes; value_to_insert_in_record = QString::fromUtf8(strBytes); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::DATE:     { QDate date; field_parse_stream >> date; if(date.isValid()) value_to_insert_in_record = date.toString("yyyy-MM-dd"); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::DATETIME:
+                            case xhyfield::TIMESTAMP:{ QDateTime datetime; field_parse_stream >> datetime; if(datetime.isValid()) value_to_insert_in_record = datetime.toString("yyyy-MM-dd HH:mm:ss"); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::BOOL:     { bool boolValue; field_parse_stream >> boolValue; value_to_insert_in_record = boolValue ? "1" : "0"; field_read_status = field_parse_stream.status(); break;}
+                            default:
+                                qWarning() << "    [LOAD_DB_TRD] Unhandled data type for field '" << field_def.name() << "' (Type ID: " << static_cast<int>(field_def.type()) << "). Reading as QByteArray.";
+                                QByteArray unknownData;
+                                if (!field_parse_stream.atEnd()) field_parse_stream >> unknownData;
+                                value_to_insert_in_record = QString::fromUtf8(unknownData);
+                                field_read_status = field_parse_stream.status();
+                                break;
+                            }
+                            if (field_read_status != QDataStream::Ok) {
+                                qWarning() << "    [LOAD_DB_TRD] Stream error after attempting to read non-NULL field '" << field_def.name()
+                                << "' in table '" << current_table_name << "'. Status: " << field_read_status << ". Setting field to NULL.";
+                                value_to_insert_in_record = QString();
+                            }
+                        }
+                        new_loaded_record.insert(field_def.name(), value_to_insert_in_record);
+                    } // end for fields in record
+
+                    if (trd_processing_error_occurred) { // If error reading a field's null marker
+                        qWarning() << "    [LOAD_DB_TRD] Aborted reading current record due to previous field read error in table " << current_table_name;
+                        break; // Exit record loop (while !record_file_stream.atEnd())
+                    }
+
+                    if (field_parse_stream.status() != QDataStream::Ok && !field_parse_stream.atEnd()){
+                        qWarning() << "    [LOAD_DB_TRD] Record parser: Stream has unread data or error for table '" << current_table_name
+                                   << "' after processing all fields. Stream status: " << field_parse_stream.status();
+                    }
+                    table.addrecord(new_loaded_record);
+                } // end while records in TRD
+                trdFile.close();
+            } else { // TRD file handling
+                if(QFile::exists(trdFilePath)) {
+                    qWarning() << "    [LOAD_DB] Failed to open TRD file for reading (but it exists):" << trdFilePath;
+                } else {
+                    qDebug() << "    [LOAD_DB] TRD file not found (this is normal for a new or empty table):" << trdFilePath;
+                }
+            }
+            db.addTable(table); // Add the fully populated (or partially if TRD errors) table to the database object
+        } // end for TDF files (tables)
+        m_databases.append(db); // Add the database to the manager's list
+    } // end for DB directories
+    qDebug() << "[LOAD_DB] Finished loading all databases and tables.";
 }
-
-
 xhydatabase* xhydbmanager::find_database(const QString& dbname) {
     for (auto& db : m_databases) {
         if (db.name().toLower() == dbname.toLower()) {
@@ -633,120 +712,208 @@ bool xhydbmanager::isInTransaction() const {
 
 // 1. 保存表定义文件
 void xhydbmanager::save_table_definition_file(const QString& filePath, const xhytable* table) {
-    QSet<QString> uniqueFields; // 用于去重
-    for (const auto& field : table->fields()) {
-        if (uniqueFields.contains(field.name())) {
-            qWarning() << "忽略重复字段：" << field.name();
-            continue;
-        }
-        uniqueFields.insert(field.name());
+    if (!table) {
+        qWarning() << "[SAVE_TDF] Error: Table pointer is null for path " << filePath;
+        return;
+    }
     QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly)) {
-        qWarning() << "Failed to open TDF file:" << filePath;
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) { // Truncate to overwrite existing file
+        qWarning() << "[SAVE_TDF] Error: Failed to open TDF file for writing: " << filePath;
         return;
     }
 
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_5_15);
+
+    qDebug() << "[SAVE_TDF] Saving TDF for table:" << table->name() << "to" << filePath;
 
     for (const auto& field : table->fields()) {
         FieldBlock fb;
-        memset(&fb, 0, sizeof(FieldBlock));
+        memset(&fb, 0, sizeof(FieldBlock)); // Initialize FieldBlock with zeros
 
-        fb.order = field.order();
-        qstrncpy(fb.name, field.name().toUtf8().constData(), 128);
+        // fb.order; // 如果您的 xhyfield 有 order 成员并且需要保存，请在这里设置
+        qstrncpy(fb.name, field.name().toUtf8().constData(), sizeof(fb.name) - 1);
         fb.type = static_cast<int>(field.type());
 
-        // 处理约束
+        fb.param = 0; // Initialize parameter fields
+        fb.size = 0;
+
+        xhyfield::datatype currentType = field.type();
+        const QStringList& constraints = field.constraints(); // Get all constraints for the field
+
+        if (currentType == xhyfield::CHAR || currentType == xhyfield::VARCHAR) {
+            bool sizeFound = false;
+            for (const QString& c : constraints) {
+                if (c.startsWith("SIZE(", Qt::CaseInsensitive) && c.endsWith(")")) {
+                    bool ok;
+                    int len = c.mid(5, c.length() - 6).toInt(&ok);
+                    if (ok && len > 0) {
+                        fb.param = len;
+                        sizeFound = true;
+                    } else {
+                        qWarning() << "[SAVE_TDF] Invalid SIZE parameter for" << field.name() << ":" << c;
+                        // Provide safe defaults if conversion fails or len is invalid
+                        if (currentType == xhyfield::CHAR) fb.param = 1;
+                        else fb.param = 255; // A common default for VARCHAR if not specified properly
+                    }
+                    break; // Assuming only one SIZE constraint
+                }
+            }
+            if (!sizeFound) { // If no SIZE constraint was found in xhyfield's list
+                if (currentType == xhyfield::CHAR) {
+                    fb.param = 1; // Default CHAR to SIZE(1) if not specified
+                    qDebug() << "[SAVE_TDF] Field " << field.name() << " (CHAR) missing SIZE constraint, defaulted fb.param to 1.";
+                } else if (currentType == xhyfield::VARCHAR) {
+                    qWarning() << "[SAVE_TDF] Field " << field.name() << " (VARCHAR) missing SIZE constraint. fb.param remains 0 (may load as base VARCHAR or default).";
+                    // fb.param = 255; // Or a common default for VARCHAR
+                }
+            }
+        } else if (currentType == xhyfield::DECIMAL) {
+            bool p_found = false;
+            bool s_found = false; // To track if scale was explicitly set
+            for (const QString& c : constraints) {
+                if (c.startsWith("PRECISION(", Qt::CaseInsensitive) && c.endsWith(")")) {
+                    bool ok;
+                    int p = c.mid(10, c.length() - 11).toInt(&ok);
+                    if (ok && p > 0) {
+                        fb.param = p; // Store Precision in fb.param
+                        p_found = true;
+                    } else {
+                        qWarning() << "[SAVE_TDF] Invalid PRECISION for" << field.name() << ":" << c;
+                    }
+                } else if (c.startsWith("SCALE(", Qt::CaseInsensitive) && c.endsWith(")")) {
+                    bool ok;
+                    int s = c.mid(6, c.length() - 7).toInt(&ok);
+                    if (ok && s >= 0) {
+                        fb.size = s; // Store Scale in fb.size
+                        s_found = true;
+                    } else {
+                        qWarning() << "[SAVE_TDF] Invalid SCALE for" << field.name() << ":" << c;
+                    }
+                }
+            }
+            if (!p_found) {
+                qWarning() << "[SAVE_TDF] DECIMAL field " << field.name() << " missing PRECISION constraint. fb.param set to 0.";
+            }
+            // fb.size will be 0 if SCALE constraint was missing or invalid, which is a valid default for scale.
+        }
+        // ENUM values (field.enum_values()) are not saved into FieldBlock's param/size.
+        // This would require a different serialization strategy for enum values.
+
         fb.integrities = 0;
-        if (field.constraints().contains("PRIMARY_KEY")) fb.integrities |= 0x01;
-        if (field.constraints().contains("NOT_NULL")) fb.integrities |= 0x02;
-        if (field.constraints().contains("UNIQUE")) fb.integrities |= 0x04;
+        if (constraints.contains("PRIMARY_KEY", Qt::CaseInsensitive)) fb.integrities |= 0x01;
+        if (constraints.contains("NOT_NULL", Qt::CaseInsensitive)) fb.integrities |= 0x02;
+        if (constraints.contains("UNIQUE", Qt::CaseInsensitive)) fb.integrities |= 0x04;
+        // Other constraints like CHECK, FOREIGN KEY are not currently saved via FieldBlock.
 
-        GetSystemTime(&fb.mtime);
+        GetSystemTime(&fb.mtime); // Windows specific for modification time
         out.writeRawData(reinterpret_cast<const char*>(&fb), sizeof(FieldBlock));
+        qDebug() << "  [SAVE_TDF] Saved field:" << field.name() << "TypeID:" << fb.type << "Param:" << fb.param << "Size:" << fb.size << "Integrities:" << fb.integrities;
     }
-
     file.close();
-    }}
-
+    qDebug() << "[SAVE_TDF] Finished saving TDF for table:" << table->name();
+}
 // 2. 保存记录文件
 void xhydbmanager::save_table_records_file(const QString& filePath, const xhytable* table) {
+    if (!table) {
+        qWarning() << "[SAVE_TRD] Error: Table pointer is null for path " << filePath;
+        return;
+    }
     QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly)) {
-        qWarning() << "Failed to open TRD file:" << filePath;
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) { // Truncate to overwrite
+        qWarning() << "[SAVE_TRD] Error: Failed to open TRD file for writing:" << filePath;
         return;
     }
 
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_5_15);
+    qDebug() << "[SAVE_TRD] Saving TRD for table:" << table->name() << "to" << filePath << "with" << table->records().count() << "records.";
 
-    for (const auto& record : table->records()) {
-        QByteArray recordData;
-        QDataStream recordStream(&recordData, QIODevice::WriteOnly);
+    for (const auto& record : table->records()) { // records() should provide committed records
+        QByteArray recordDataBuffer; // Buffer for a single record's fields
+        QDataStream record_field_stream(&recordDataBuffer, QIODevice::WriteOnly);
+        record_field_stream.setVersion(QDataStream::Qt_5_15);
 
         for (const auto& field : table->fields()) {
-            QString value = record.value(field.name());
-            // 根据字段类型序列化数据
-            switch (field.type()) {
-            case xhyfield::TINYINT:
-                recordStream << static_cast<qint8>(value.toInt());
-                break;
-            case xhyfield::SMALLINT:
-                recordStream << static_cast<qint16>(value.toInt());
-                break;
-            case xhyfield::INT:
-                recordStream << value.toInt();
-                break;
-            case xhyfield::BIGINT:
-                recordStream << value.toLongLong();
-                break;
-            case xhyfield::FLOAT:
-                recordStream << value.toFloat();
-                break;
-            case xhyfield::DOUBLE:
-                recordStream << value.toDouble();
-                break;
-            case xhyfield::CHAR:
-            case xhyfield::VARCHAR: {
-                // 处理字符串类型，UTF-8编码
-                QByteArray strBytes = value.toUtf8();
-                recordStream << strBytes;
-                break;
-            }
-            case xhyfield::DATE: {
-                // 日期格式：YYYY-MM-DD 转换为 QDate
-                QDate date = QDate::fromString(value, "yyyy-MM-dd");
-                recordStream << date;
-                break;
-            }
-            case xhyfield::DATETIME: {
-                // 日期时间格式：YYYY-MM-DD HH:mm:ss 转换为 QDateTime
-                QDateTime datetime = QDateTime::fromString(value, "yyyy-MM-dd HH:mm:ss");
-                recordStream << datetime;
-                break;
-            }
-            case xhyfield::BOOL:
-                recordStream << static_cast<bool>(value.toInt());
-                break;
-            default:
-                // 处理未知类型或未实现类型
-                qWarning() << "Unsupported data type for field:" << field.name();
-                recordStream << value; // 默认按字符串存储
-                break;
-            }
-        }
+            QString str_value_from_record = record.value(field.name());
 
-        // 4字节对齐
-        int padding = (4 - (recordData.size() % 4)) % 4;
-        recordData.append(padding, '\0');
+            if (str_value_from_record.isNull()) { // Check for genuinely null QString (SQL NULL)
+                record_field_stream << static_cast<quint8>(1); // Marker: 1 for NULL
+            } else {
+                record_field_stream << static_cast<quint8>(0); // Marker: 0 for NOT NULL
+                bool conversion_ok = true; // Assume conversion will be ok
 
-        out << static_cast<quint32>(recordData.size());
-        out.writeRawData(recordData.constData(), recordData.size());
-    }
+                switch (field.type()) {
+                case xhyfield::TINYINT:
+                    record_field_stream << static_cast<qint8>(str_value_from_record.toShort(&conversion_ok));
+                    if (!conversion_ok) qWarning() << "[SAVE_TRD] Conversion warning for TINYINT field '" << field.name() << "', value: '" << str_value_from_record << "'";
+                    break;
+                case xhyfield::SMALLINT:
+                    record_field_stream << static_cast<qint16>(str_value_from_record.toShort(&conversion_ok));
+                    if (!conversion_ok) qWarning() << "[SAVE_TRD] Conversion warning for SMALLINT field '" << field.name() << "', value: '" << str_value_from_record << "'";
+                    break;
+                case xhyfield::INT:
+                    record_field_stream << str_value_from_record.toInt(&conversion_ok);
+                    if (!conversion_ok) qWarning() << "[SAVE_TRD] Conversion warning for INT field '" << field.name() << "', value: '" << str_value_from_record << "'";
+                    break;
+                case xhyfield::BIGINT:
+                    record_field_stream << str_value_from_record.toLongLong(&conversion_ok);
+                    if (!conversion_ok) qWarning() << "[SAVE_TRD] Conversion warning for BIGINT field '" << field.name() << "', value: '" << str_value_from_record << "'";
+                    break;
+                case xhyfield::FLOAT:
+                    record_field_stream << str_value_from_record.toFloat(&conversion_ok);
+                    if (!conversion_ok) qWarning() << "[SAVE_TRD] Conversion warning for FLOAT field '" << field.name() << "', value: '" << str_value_from_record << "'";
+                    break;
+                case xhyfield::DOUBLE:
+                    record_field_stream << str_value_from_record.toDouble(&conversion_ok);
+                    if (!conversion_ok) qWarning() << "[SAVE_TRD] Conversion warning for DOUBLE field '" << field.name() << "', value: '" << str_value_from_record << "'";
+                    break;
+                case xhyfield::DECIMAL: // Store DECIMAL as string to preserve precision
+                case xhyfield::CHAR:
+                case xhyfield::VARCHAR:
+                case xhyfield::TEXT:
+                case xhyfield::ENUM: { // Store ENUM as its string value
+                    QByteArray strBytes = str_value_from_record.toUtf8();
+                    record_field_stream << strBytes; // QDataStream handles length-prefix for QByteArray
+                    break;
+                }
+                case xhyfield::DATE: {
+                    QDate date = QDate::fromString(str_value_from_record, "yyyy-MM-dd");
+                    if (!date.isValid() && !str_value_from_record.isEmpty()) { // If original string was non-empty but invalid
+                        qWarning() << "[SAVE_TRD] Invalid date string '" << str_value_from_record << "' for field " << field.name() << ". Saving as invalid QDate.";
+                    }
+                    record_field_stream << date;
+                    break;
+                }
+                case xhyfield::DATETIME:
+                case xhyfield::TIMESTAMP: { // Treat TIMESTAMP like DATETIME for serialization
+                    QDateTime datetime = QDateTime::fromString(str_value_from_record, "yyyy-MM-dd HH:mm:ss");
+                    if (!datetime.isValid() && !str_value_from_record.isEmpty()) {
+                        qWarning() << "[SAVE_TRD] Invalid datetime string '" << str_value_from_record << "' for field " << field.name() << ". Saving as invalid QDateTime.";
+                    }
+                    record_field_stream << datetime;
+                    break;
+                }
+                case xhyfield::BOOL:
+                    record_field_stream << (str_value_from_record.compare("true", Qt::CaseInsensitive) == 0 || str_value_from_record == "1");
+                    break;
+                default:
+                    qWarning() << "[SAVE_TRD] Unsupported data type for field '" << field.name() << "' (Type ID: " << static_cast<int>(field.type()) << "). Saving as raw UTF-8 string.";
+                    QByteArray strBytes = str_value_from_record.toUtf8();
+                    record_field_stream << strBytes; // Fallback
+                    break;
+                }
+            }
+        } // end for fields in record
 
+        // Write the size of the record's data block, then the data block itself
+        out << static_cast<quint32>(recordDataBuffer.size());
+        out.writeRawData(recordDataBuffer.constData(), recordDataBuffer.size());
+    } // end for records in table
     file.close();
+    qDebug() << "[SAVE_TRD] Finished saving TRD for table:" << table->name();
 }
+
 // 3. 保存完整性约束文件
 void xhydbmanager::save_table_integrity_file(const QString& filePath, const xhytable* table) {
     QFile file(filePath);

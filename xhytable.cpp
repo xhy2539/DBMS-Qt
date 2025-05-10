@@ -4,7 +4,33 @@
 #include <QDebug>
 #include <QVariant>
 #include <QMetaType>
+#include <limits> // <--- 确保此行存在
+#include <QRegularExpression>
+namespace { // 使用匿名命名空间或设为类的静态私有方法
+bool parseDecimalParams(const QStringList& constraints, int& precision, int& scale) {
+    bool p_found = false;
+    bool s_found = false;
+    // SQL 标准：DECIMAL(P) 等同于 DECIMAL(P,0)。如果只有P，S默认为0。
+    // 如果P,S都未定义，则行为依赖于具体DBMS实现（可能用默认值，或报错）。
+    // 这里我们要求至少P要被定义。
+    precision = 0;
+    scale = 0;
 
+    for (const QString& c : constraints) {
+        if (c.startsWith("PRECISION(", Qt::CaseInsensitive) && c.endsWith(")")) {
+            bool conv_ok = false;
+            precision = c.mid(10, c.length() - 11).toInt(&conv_ok);
+            if (conv_ok) p_found = true;
+        } else if (c.startsWith("SCALE(", Qt::CaseInsensitive) && c.endsWith(")")) {
+            bool conv_ok = false;
+            scale = c.mid(6, c.length() - 7).toInt(&conv_ok);
+            if (conv_ok) s_found = true;
+        }
+    }
+    // 如果只找到了 PRECISION 而没有 SCALE，SCALE 默认为 0 是符合SQL标准的。
+    return p_found;
+}
+}
 xhytable::xhytable(const QString& name) : m_name(name), m_inTransaction(false) {}
 
 const QList<xhyrecord>& xhytable::records() const {
@@ -395,6 +421,26 @@ void xhytable::validateRecord(const QMap<QString, QString>& values, const xhyrec
             if (!validateType(fieldDef.type(), valueToValidate, fieldDef.constraints())) {
                 throw std::runtime_error("字段 '" + fieldName.toStdString() + "' 的值 '" + valueToValidate.toStdString() + "' 类型错误或不符合长度/格式约束。");
             }
+            if (fieldDef.type() == xhyfield::ENUM) {
+                // 假设枚举值比较是区分大小写的，如果需要不区分，请使用 Qt::CaseInsensitive
+                // 另外，需要确保 fieldDef.enum_values() 返回的是有效的列表
+                if (fieldDef.enum_values().isEmpty()) {
+                    qWarning() << "警告：字段 '" << fieldName.toStdString() << "' 是 ENUM 类型，但其允许的值列表为空。请检查表定义。";
+                    // 根据您的策略，这里可以选择抛出错误或者允许通过（如果允许定义空的ENUM列表）
+                    // throw std::runtime_error("字段 '" + fieldName.toStdString() + "' (ENUM) 的允许值列表为空。");
+                } else if (!fieldDef.enum_values().contains(valueToValidate, Qt::CaseSensitive)) {
+                    QStringList allowedValues = fieldDef.enum_values();
+                    QString allowedValuesStr;
+                    for(int i = 0; i < allowedValues.size(); ++i) {
+                        allowedValuesStr += "'" + allowedValues.at(i) + "'";
+                        if (i < allowedValues.size() - 1) {
+                            allowedValuesStr += ", ";
+                        }
+                    }
+                    throw std::runtime_error("字段 '" + fieldName.toStdString() + "' 的值 '" + valueToValidate.toStdString() +
+                                             "' 不是有效的枚举值。允许的值为: " + allowedValuesStr.toStdString());
+                }
+            }
             // CHECK 约束 (您提供的版本中 checkConstraint 是占位符)
             if (fieldDef.hasCheck() && !checkConstraint(fieldDef, valueToValidate)) {
                 throw std::runtime_error("字段 '" + fieldName.toStdString() + "' 的值 '" + valueToValidate.toStdString() + "' 违反了 CHECK 约束: " + fieldDef.checkConstraint().toStdString());
@@ -467,10 +513,192 @@ bool xhytable::validateType(xhyfield::datatype type, const QString& value, const
     if (value.isNull()) return true;
     bool ok;
     switch(type) {
-    case xhyfield::INT: case xhyfield::TINYINT: case xhyfield::SMALLINT: case xhyfield::BIGINT:
-        value.toLongLong(&ok); return ok;
-    case xhyfield::FLOAT: case xhyfield::DOUBLE: case xhyfield::DECIMAL:
-        value.toDouble(&ok); return ok;
+    case xhyfield::TINYINT:
+    case xhyfield::SMALLINT:
+    case xhyfield::INT:
+    case xhyfield::BIGINT: {
+        qlonglong val_ll;
+        bool conversion_successful;
+
+        // 1. 首先用正则表达式检查字符串是否完全是整数格式 (允许负号)
+        QRegularExpression int_pattern(R"(^-?\d+$)");
+        if (!int_pattern.match(value).hasMatch()) {
+            qWarning() << "Value '" << value << "' is not a valid integer format for type " << static_cast<int>(type);
+            conversion_successful = false;
+        } else {
+            // 2. 如果格式正确，再尝试转换为 qlonglong
+            val_ll = value.toLongLong(&conversion_successful);
+            if (!conversion_successful) {
+                // 这个分支理论上不应该进入，如果正则表达式通过了但toLongLong失败，可能是非常大的数超出了qlonglong
+                qWarning() << "Value '" << value << "' failed qlonglong conversion despite regex match for type " << static_cast<int>(type);
+            }
+        }
+
+        if (conversion_successful) {
+            // 3. 根据具体类型进行范围检查
+            switch(type) {
+            case xhyfield::TINYINT:
+                // 假设 TINYINT 范围为 signed char: -128 到 127
+                if (val_ll < -128 || val_ll > 127) {
+                    qWarning() << "Value '" << value << "' (" << val_ll << ") is out of range for TINYINT (-128 to 127).";
+                    conversion_successful = false;
+                }
+                break;
+            case xhyfield::SMALLINT:
+                // 假设 SMALLINT 范围为 signed short: -32768 到 32767
+                if (val_ll < -32768 || val_ll > 32767) {
+                    qWarning() << "Value '" << value << "' (" << val_ll << ") is out of range for SMALLINT (-32768 to 32767).";
+                    conversion_successful = false;
+                }
+                break;
+            case xhyfield::INT:
+                // 使用 std::numeric_limits 获取标准 int 范围
+                if (val_ll < std::numeric_limits<int>::min() || val_ll > std::numeric_limits<int>::max()) {
+                    qWarning() << "Value '" << value << "' (" << val_ll << ") is out of range for INT ("
+                               << std::numeric_limits<int>::min() << " to " << std::numeric_limits<int>::max() << ").";
+                    conversion_successful = false;
+                }
+                break;
+            case xhyfield::BIGINT:
+
+                break;
+            default: // 不应到达
+                conversion_successful = false;
+                break;
+            }
+        }
+        return conversion_successful;
+    }
+    case xhyfield::FLOAT:
+    case xhyfield::DOUBLE: { // FLOAT 和 DOUBLE 的基本验证
+        // 对于这些类型，QString::toDouble 的校验目前是足够的
+        QRegularExpression float_pattern(R"(^-?\d*\.?\d+(?:[eE][-+]?\d+)?$)");
+        if (!value.isEmpty() && !float_pattern.match(value).hasMatch()) {
+            qWarning() << "Value '" << value << "' is not in a recognizable general number format for FLOAT/DOUBLE.";
+            return false;
+        }
+        value.toDouble(&ok); // ok 会被设置
+        if (!ok && !value.isEmpty()) { // 如果非空但转换失败
+            qWarning() << "Value '" << value << "' is not a valid floating-point format for type " << static_cast<int>(type);
+        }
+        return ok || value.isEmpty(); // 允许空字符串通过类型验证（后续由NOT NULL或CHECK处理）
+    }
+    case xhyfield::DECIMAL: {
+        int precision = 0, scale = 0;
+        // parseDecimalParams 辅助函数应已在 xhytable.cpp 中定义
+        // bool params_defined = parseDecimalParams(constraints, precision, scale);
+        // 假设 parseDecimalParams 是之前定义的：
+        bool p_found = false; // parseDecimalParams 内部应设置
+        precision = 0; scale = 0;
+        for (const QString& c : constraints) {
+            if (c.startsWith("PRECISION(", Qt::CaseInsensitive) && c.endsWith(")")) {
+                bool conv_ok = false;
+                precision = c.mid(10, c.length() - 11).toInt(&conv_ok);
+                if (conv_ok) p_found = true;
+            } else if (c.startsWith("SCALE(", Qt::CaseInsensitive) && c.endsWith(")")) {
+                bool conv_ok = false;
+                scale = c.mid(6, c.length() - 7).toInt(&conv_ok);
+                // s_found 可以在这里设置，但 parseDecimalParams 的返回值主要看 p_found
+            }
+        }
+        bool params_defined = p_found; // DECIMAL 必须有 P，S 可默认为 0
+
+        if (!params_defined) {
+            qWarning() << "DECIMAL type for value '" << value << "' lacks PRECISION constraint. Cannot perform full validation. Performing basic number validation.";
+            QRegularExpression basic_num_pattern(R"(^-?\d*\.?\d*$)");
+            if (!value.isEmpty() && !basic_num_pattern.match(value).hasMatch()) return false;
+            bool conv_ok_double;
+            value.toDouble(&conv_ok_double);
+            return conv_ok_double || value.isEmpty();
+        }
+
+        if (precision <= 0) {
+            qWarning() << "DECIMAL precision " << precision << " (from constraints) is invalid for value '" << value << "'. Must be > 0.";
+            return false;
+        }
+        if (scale < 0 || scale > precision) {
+            qWarning() << "DECIMAL scale " << scale << " (from constraints) is invalid for precision " << precision
+                       << " (value: '" << value << "'). Must be 0 <= scale <= precision.";
+            return false;
+        }
+
+        if (value.isEmpty()) return true; // 空字符串由 NOT NULL 处理
+
+        QRegularExpression decimal_pattern(R"(^-?\d*(\.\d*)?$)");
+        if (!decimal_pattern.match(value).hasMatch() || value == "." || value == "-" || value == "-.") {
+            qWarning() << "Value '" << value << "' is not a valid DECIMAL format.";
+            return false;
+        }
+
+        bool temp_conv_ok;
+        value.toDouble(&temp_conv_ok); // 进一步检查是否能转为浮点数，排除 "1.2.3"
+        if(!temp_conv_ok) {
+            qWarning() << "Value '" << value << "' could not be parsed as a number for DECIMAL validation.";
+            return false;
+        }
+
+        QString num_str = value;
+        if (num_str.startsWith('-')) {
+            num_str.remove(0, 1);
+        }
+
+        int dot_pos = num_str.indexOf('.');
+        QString int_part_str = (dot_pos == -1) ? num_str : num_str.left(dot_pos);
+        QString frac_part_str = (dot_pos == -1) ? "" : num_str.mid(dot_pos + 1);
+
+        // 1. 验证小数部分的位数 (scale)
+        if (frac_part_str.length() > scale) {
+            qWarning() << "Value '" << value << "' has " << frac_part_str.length()
+            << " decimal places, exceeding defined DECIMAL scale of " << scale << ".";
+            return false;
+        }
+
+        // 2. 验证整数部分的位数 (P-S)
+        int max_int_digits_allowed = precision - scale;
+        int current_int_digits = 0;
+
+        if (int_part_str.isEmpty()) { // 例如 ".123"
+            current_int_digits = 0;
+        } else {
+            // 规范化整数部分，例如 "007" -> "7", "0" -> "0"
+            bool ok_int_conv;
+            qlonglong int_val = int_part_str.toLongLong(&ok_int_conv);
+            if (!ok_int_conv && !int_part_str.isEmpty()) { // 如果非空但无法转换为longlong (例如 "abc")
+                qWarning() << "Invalid integer part '" << int_part_str << "' for DECIMAL value '" << value << "'.";
+                return false;
+            }
+            if (int_val == 0 && !int_part_str.isEmpty()) { // 如果整数部分是 "0", "00" 等
+                current_int_digits = 1; // "0" 本身算一个有效整数位，但特殊处理
+            } else if (int_val != 0) {
+                current_int_digits = QString::number(qAbs(int_val)).length(); // 非零整数的位数
+            } else { // int_part_str 为空或转换后为0但原始字符串也代表0
+                current_int_digits = 0;
+            }
+        }
+
+        // 核心逻辑修正点：
+        // 如果 P-S = 0 (小数点前不允许有非0数字), 且实际整数部分仅为 "0", 这是允许的。
+        // 例如 DECIMAL(5,5) 和值 "0.12345"。current_int_digits = 1, max_int_digits_allowed = 0.
+        // 此时不应因 "1 > 0" 而报错。
+        if (current_int_digits > max_int_digits_allowed) {
+            if (max_int_digits_allowed == 0 && current_int_digits == 1 && !int_part_str.isEmpty() && int_part_str.toLongLong() == 0) {
+                // 这是允许的情况, 如 "0.123" 对于 DECIMAL(3,3)
+                // 或者 "000.123" 对于 DECIMAL(3,3) (current_int_digits 会是 1)
+            } else {
+                qWarning() << "Value '" << value << "' has effective integer part with " << current_int_digits
+                           << " digit(s) (from '" << int_part_str << "'), exceeding allowed " << max_int_digits_allowed
+                           << " for DECIMAL(" << precision << "," << scale << ").";
+                return false;
+            }
+        }
+
+        // (可选) 也可以增加一个对总有效数字位数的校验，但这通常由 S 和 P-S 的校验间接保证。
+        // 例如，去除符号和小数点，然后去除整数部分的前导0（除非整数部分就是0），然后计算总长度。
+        // QString all_digits_str = int_part_str + frac_part_str; // 这是一个简化的思路
+        // if (all_digits_str.length() > precision && !(int_part_str == "0" && frac_part_str.length() == precision)) { ... }
+
+        return true; // 所有检查通过
+    }
     case xhyfield::BOOL:
         return (value.compare("true", Qt::CaseInsensitive) == 0 || value.compare("false", Qt::CaseInsensitive) == 0 || value == "1" || value == "0");
     case xhyfield::DATE:

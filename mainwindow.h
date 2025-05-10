@@ -114,5 +114,16 @@ private:
     void handleItemClicked(QTreeWidgetItem *item, int column);
     void handleItemDoubleClicked(QTreeWidgetItem *item, int column);
     void handleString(const QString& text, queryWidget* querywidget);
+    xhyfield::datatype parseDataTypeAndParams(
+        const QString& type_str_input,
+        QStringList& auto_generated_constraints,
+        QString& out_error_message
+        );
+    bool extractParenthesizedParams(
+        const QString& params_str_with_parens,
+        int& p_val,
+        int& s_val,
+        bool& s_specified
+        );
 };
 #endif // MAINWINDOW_H

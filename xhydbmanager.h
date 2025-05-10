@@ -104,6 +104,7 @@ public:
     void load_table_records(const QString &trd_path, xhytable &table);
     void load_table_definition(const QString &tdf_path, xhytable &table);
 private:
+    bool update_ruanko_db_after_drop(const QString& dropped_dbname);
     void save_table_definition_file(const QString& filePath, const xhytable* table);
     void save_table_records_file(const QString& filePath, const xhytable* table);
     void save_table_integrity_file(const QString& filePath, const xhytable* table);

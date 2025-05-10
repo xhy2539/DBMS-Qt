@@ -828,8 +828,10 @@ void MainWindow::handleUpdate(const QString& command) {
     }
 
     QString table_name = match.captured(1).trimmed();
-    QString set_part = match.captured(2).trimmed();
-    QString where_part = match.captured(3).trimmed();
+    QString set_part_str = match.captured(2).trimmed();
+    QString where_part_str = match.captured(3).trimmed();
+
+    qDebug() << "[MainWindow::handleUpdate] Table:" << table_name << "SET part:" << set_part_str << "WHERE part:" << where_part_str;
 
 
     bool transactionStartedHere = false;
@@ -842,47 +844,70 @@ void MainWindow::handleUpdate(const QString& command) {
     }
 
     try {
-        QMap<QString, QString> updates;
-        QStringList set_clauses = set_part.split(QLatin1Char(','), Qt::SkipEmptyParts);
-        for (const QString& clause : set_clauses) {
-            QStringList parts = clause.split(QLatin1Char('='));
-            if (parts.size() == 2) {
-                QString fieldName = parts[0].trimmed();
-                QString valueStr = parts[1].trimmed();
-                QVariant parsedVal = parseLiteralValue(valueStr); // **Aufruf**
-                updates[fieldName] = parsedVal.isNull() ? "NULL" : parsedVal.toString();
+        QMap<QString, QString> updates_for_table; // 存储字段名和它们的原始值/表达式字符串
+        // 按逗号分割 SET 子句中的多个赋值
+        QStringList set_clauses = set_part_str.split(QLatin1Char(','), Qt::SkipEmptyParts);
+
+        for (const QString& clause_const : set_clauses) {
+            QString clause = clause_const.trimmed(); // 去除每个 "col=val" 两边的空格
+            if (clause.isEmpty()) continue;
+
+            QString fieldName;
+            QString valueExpression;
+            int firstEqualSign = clause.indexOf(QLatin1Char('='));
+
+            if (firstEqualSign != -1) {
+                fieldName = clause.left(firstEqualSign).trimmed();
+                valueExpression = clause.mid(firstEqualSign + 1).trimmed(); // 获取第一个 '=' 之后的所有内容作为表达式
             } else {
-                throw std::runtime_error(("无效的SET子句: " + clause).toStdString());
+                throw std::runtime_error(("无效的SET子句片段格式 (缺少 '='): " + clause).toStdString());
+            }
+
+            if (fieldName.isEmpty()) {
+                throw std::runtime_error(("无效的SET子句片段格式 (字段名为空): " + clause).toStdString());
+            }
+            qDebug() << "[MainWindow::handleUpdate] Parsed SET clause: Field='" << fieldName << "', Expression/Value='" << valueExpression << "'";
+            updates_for_table[fieldName] = valueExpression; // 直接存储原始表达式字符串
+        }
+
+        ConditionNode conditionRoot; // 默认是 EMPTY 类型
+        if (!where_part_str.isEmpty()) {
+            if (!parseWhereClause(where_part_str, conditionRoot)) { // parseWhereClause 会在失败时打印错误
+                if(transactionStartedHere) db_manager.rollbackTransaction();
+                return; // WHERE 子句解析失败，中止操作
             }
         }
+        // 如果 where_part_str 为空，conditionRoot 保持 EMPTY，将匹配所有行
 
-        ConditionNode conditionRoot;
-        if (!parseWhereClause(where_part, conditionRoot)) { // **Aufruf**
-            if(transactionStartedHere) db_manager.rollbackTransaction();
-            return;
-        }
+        int affected_rows = db_manager.updateData(current_db_name, table_name, updates_for_table, conditionRoot);
 
-        int affected_rows = db_manager.updateData(current_db_name, table_name, updates, conditionRoot);
         if (affected_rows >= 0) {
             if (transactionStartedHere) {
                 if (db_manager.commitTransaction()) {
                     current_query->appendPlainText(QString("%1 行已更新。").arg(affected_rows));
                 } else {
-                    current_query->appendPlainText("错误：事务提交失败。更改已回滚。");
+                    current_query->appendPlainText("错误：事务提交失败。更改可能已回滚或处于不确定状态。");
                 }
             } else {
                 current_query->appendPlainText(QString("%1 行已更新 (在现有事务中)。").arg(affected_rows));
             }
-        } else {
-            current_query->appendPlainText("错误：更新数据失败。");
-            if(transactionStartedHere) db_manager.rollbackTransaction();
+        } else { // affected_rows < 0 表示 db_manager.updateData 内部发生了错误
+            current_query->appendPlainText("错误：更新数据操作在管理器层面失败。"); // db_manager 或 xhytable 内部应有更详细的 qWarning
+            if(transactionStartedHere) {
+                db_manager.rollbackTransaction();
+                current_query->appendPlainText("事务已回滚。");
+            }
         }
     } catch (const std::runtime_error& e) {
-        if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("更新操作错误: " + QString::fromStdString(e.what()));
+        if (transactionStartedHere) {
+            db_manager.rollbackTransaction();
+        }
+        current_query->appendPlainText("更新操作处理错误 (MainWindow): " + QString::fromStdString(e.what()));
     } catch (...) {
-        if (transactionStartedHere) db_manager.rollbackTransaction();
-        current_query->appendPlainText("更新操作发生未知错误。");
+        if (transactionStartedHere) {
+            db_manager.rollbackTransaction();
+        }
+        current_query->appendPlainText("更新操作发生未知严重错误 (MainWindow)。");
     }
 }
 
@@ -1527,11 +1552,11 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
         current_query->appendPlainText(QString("表约束 '%1' (PRIMARY KEY on %2) 已添加。").arg(constraintName.isEmpty() ? "auto_pk" : constraintName, columns.join(",")));
     } else if (constraintTypeStr == "UNIQUE") {
         if (columns.isEmpty()) { current_query->appendPlainText("错误: UNIQUE 约束必须指定列。"); return; }
-        table.add_unique_constraint(columns, constraintName);
+        table.add_unique_constraint(columns, constraintName); // 现在应该能找到
         current_query->appendPlainText(QString("表约束 '%1' (UNIQUE on %2) 已添加。").arg(constraintName, columns.join(",")));
     } else if (constraintTypeStr == "CHECK") {
         if (columnsPart.isEmpty()) { current_query->appendPlainText("错误: CHECK 约束必须指定条件表达式 (in Klammern)."); return; }
-        table.add_check_constraint(columnsPart, constraintName);
+        table.add_check_constraint(columnsPart, constraintName); // 现在应该能找到
         current_query->appendPlainText(QString("表约束 '%1' (CHECK %2) 已添加。").arg(constraintName, columnsPart));
     } else if (constraintTypeStr == "FOREIGN_KEY") {
         if (columns.isEmpty()) { current_query->appendPlainText("错误: FOREIGN KEY 约束必须指定列。"); return; }
@@ -1551,12 +1576,13 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
             current_query->appendPlainText("错误: FOREIGN KEY 列数量与引用的列数量不匹配。"); return;
         }
         if(columns.size() == 1 && referencedColumnsList.size() == 1) {
-            table.add_foreign_key(columns.first(), referencedTable, referencedColumnsList.first(), constraintName);
+            table.add_foreign_key(columns.first(), referencedTable, referencedColumnsList.first(), constraintName); // 现在应该能找到
             current_query->appendPlainText(QString("表约束 '%1' (FOREIGN KEY %2 REFERENCES %3(%4)) 已添加。")
-                                          .arg(constraintName, columns.first(), referencedTable, referencedColumnsList.first()));
+                                               .arg(constraintName, columns.first(), referencedTable, referencedColumnsList.first()));
         } else {
+            qWarning() << "组合外键的添加逻辑需要 xhytable::add_foreign_key 支持 QStringList。";
             current_query->appendPlainText(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。 (提示: 组合外键逻辑需要在xhytable中特别处理)")
-                                          .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
+                                               .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
             current_query->appendPlainText("警告: 此UI的组合外键逻辑仅为简化表示。");
         }
     } else {
@@ -1565,13 +1591,18 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
 }
 
 void MainWindow::show_databases() {
-    auto databases = db_manager.databases();
-    if (databases.isEmpty()) {
+    auto databases_list_copy = db_manager.databases(); // db_manager.databases() 内部已有日志
+    qDebug() << "[MainWindow::show_databases] Received databases list for display. Size:" << databases_list_copy.size();
+    for(const auto& db_obj : databases_list_copy) {
+        qDebug() << "  - Preparing to SHOW DB: " << db_obj.name();
+    }
+
+    if (databases_list_copy.isEmpty()) {
         current_query->appendPlainText("没有数据库。");
         return;
     }
     QSet<QString> uniqueNames;
-    for (const auto& db : databases) {
+    for (const auto& db : databases_list_copy) {
         uniqueNames.insert(db.name());
     }
     QString output = "数据库列表:\n";
@@ -1587,19 +1618,26 @@ void MainWindow::show_tables(const QString& db_name_input) {
         current_query->appendPlainText("错误: 未指定数据库名，或当前未选择数据库。");
         return;
     }
-    xhydatabase* db = db_manager.find_database(db_name);
-    if (!db) {
+    xhydatabase* db_ptr = db_manager.find_database(db_name);
+    if (!db_ptr) {
         current_query->appendPlainText(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
-    auto tables = db->tables();
-    if (tables.isEmpty()) {
+
+    const QList<xhytable>& tables_ref = db_ptr->tables(); // 使用 const ref
+    qDebug() << "[MainWindow::show_tables] For DB:" << db_name
+             << ". Received tables list for display. Size:" << tables_ref.size();
+    for(const auto& tbl_obj : tables_ref) {
+        qDebug() << "  - Preparing to SHOW Table: " << tbl_obj.name();
+    }
+
+    if (tables_ref.isEmpty()) {
         current_query->appendPlainText(QString("数据库 '%1' 中没有表。").arg(db_name));
         return;
     }
     QString output = QString("数据库 '%1' 中的表:\n").arg(db_name);
-    for (const auto& table : tables) {
-        output += "  " + table.name() + "\n";
+    for (const auto& table_item : tables_ref) {
+        output += "  " + table_item.name() + "\n";
     }
     current_query->appendPlainText(output.trimmed());
 }

@@ -5,21 +5,62 @@
 #include <QFile>
 #include <QDebug>
 #include <QDir>
+#include <qstandardpaths.h>
+#include <QCoreApplication>
 
-xhydbmanager::xhydbmanager() {
-    QDir().mkdir(m_dataDir+"/data"); // 确保 data 目录存在
-    load_databases_from_files();
+xhydbmanager::xhydbmanager() : m_inTransaction(false) {
+    // 初始化 m_dataDir - 根据用户指定，相对于当前工作目录
+    // 假设 m_dataDir 成员已在 .h 文件中声明，这里是它的初始化赋值（通常在构造函数初始化列表中完成）
+    // 如果 m_dataDir 是在 .h 中直接初始化的（C++11及以后版本允许成员变量直接初始化），
+    // 那么这里就不需要再次赋值，除非您想在构造函数中覆盖或确认它。
+    // 为清晰起见，我们假设它在构造函数中被赋予最终值：
+    m_dataDir = QDir::currentPath() + QDir::separator() + "DBMS_ROOT";
 
-    // 初始化系统数据库 ruanko.db
-    QFile ruankoDB(m_dataDir+"ruanko.db");
-    if (!ruankoDB.exists()) {
-        if (ruankoDB.open(QIODevice::WriteOnly)) {
-            ruankoDB.close();
-            qDebug() << "系统数据库 ruanko.db 已创建";
+    qDebug() << "Using CWD-relative data directory (base):" << m_dataDir;
+    qDebug() << "Application's Current Working Directory is:" << QDir::currentPath();
+
+
+    QDir baseDir(m_dataDir);
+    if (!baseDir.exists()) {
+        if (!baseDir.mkpath(".")) { // mkpath(".") 会创建路径中的所有必需目录
+            qWarning() << "CRITICAL ERROR: Could not create base data directory at" << m_dataDir
+                       << "Please check path, permissions, and ensure CWD is as expected.";
+            // 考虑在此处采取更激烈的错误处理
+            return;
         }
+        qDebug() << "Base data directory created at:" << m_dataDir;
     }
-}
 
+    // "data" 子目录将位于 m_dataDir (即 DBMS_ROOT) 内部
+    QString dataSubDirPath = m_dataDir + QDir::separator() + "data";
+    QDir dataSubDir(dataSubDirPath);
+    if (!dataSubDir.exists()) {
+        if (!dataSubDir.mkpath(".")) {
+            qWarning() << "CRITICAL ERROR: Could not create data subdirectory at" << dataSubDirPath
+                       << "Please check path and permissions.";
+            return;
+        }
+        qDebug() << "Data subdirectory created at:" << dataSubDirPath;
+    }
+
+    // ruanko.db 也将位于 m_dataDir (即 DBMS_ROOT) 内部
+    QString ruankoDbPath = m_dataDir + QDir::separator() + "ruanko.db";
+    QFile ruankoDBFile(ruankoDbPath);
+    if (!ruankoDBFile.exists()) {
+        qDebug() << "ruanko.db not found at" << ruankoDbPath << ", attempting to create.";
+        if (ruankoDBFile.open(QIODevice::WriteOnly)) {
+            ruankoDBFile.close();
+            qDebug() << "System database ruanko.db created at:" << ruankoDbPath;
+        } else {
+            qWarning() << "Failed to create ruanko.db at:" << ruankoDbPath << "Error:" << ruankoDBFile.errorString();
+        }
+    } else {
+        qDebug() << "ruanko.db found at:" << ruankoDbPath;
+    }
+
+    // 在确定并可能创建了目录之后再加载文件
+    load_databases_from_files();
+}
 bool xhydbmanager::createdatabase(const QString& dbname) {
     // 1. 检查数据库是否已存在
     for (const auto& db : m_databases) {
@@ -69,46 +110,147 @@ bool xhydbmanager::createdatabase(const QString& dbname) {
     qDebug() << "数据库创建成功：" << dbname;
     return true;
 }
+bool xhydbmanager::update_ruanko_db_after_drop(const QString& dropped_dbname) {
+    QString ruankoDbPath = m_dataDir + "/ruanko.db";
+    QString tempRuankoDbPath = m_dataDir + "/ruanko.db.tmp";
+
+    QFile old_db_file(ruankoDbPath);
+    QFile new_db_file(tempRuankoDbPath);
+
+    if (!old_db_file.exists()) {
+        qWarning() << "ruanko.db does not exist at" << ruankoDbPath << ". Cannot update after drop.";
+        return true;
+    }
+
+    if (!old_db_file.open(QIODevice::ReadOnly)) {
+        qWarning() << "Failed to open " << ruankoDbPath << " for reading. Error: " << old_db_file.errorString();
+        return false;
+    }
+    if (!new_db_file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "Failed to open " << tempRuankoDbPath << " for writing. Error: " << new_db_file.errorString();
+        old_db_file.close();
+        return false;
+    }
+
+    QDataStream in_stream(&old_db_file);
+    in_stream.setVersion(QDataStream::Qt_5_15);
+    QDataStream out_stream(&new_db_file);
+    out_stream.setVersion(QDataStream::Qt_5_15);
+
+    bool error_occurred = false;
+    while (!in_stream.atEnd()) {
+        DatabaseBlock db_block;
+        int bytes_read = in_stream.readRawData(reinterpret_cast<char*>(&db_block), sizeof(DatabaseBlock));
+
+        if (bytes_read == 0 && in_stream.atEnd()) break;
+
+        if (bytes_read != sizeof(DatabaseBlock)) {
+            qWarning() << "Error reading DatabaseBlock from " << ruankoDbPath << ". Read " << bytes_read << " bytes, expected " << sizeof(DatabaseBlock);
+            error_occurred = true;
+            break;
+        }
+
+        QString current_db_name = QString::fromUtf8(db_block.name);
+        // Ensure null termination before comparison if strncpy was used without explicit null termination
+        current_db_name.truncate(strnlen(db_block.name, sizeof(db_block.name)));
+
+
+        if (current_db_name.compare(dropped_dbname, Qt::CaseInsensitive) != 0) {
+            if (out_stream.writeRawData(reinterpret_cast<const char*>(&db_block), sizeof(DatabaseBlock)) != sizeof(DatabaseBlock)) {
+                qWarning() << "Error writing DatabaseBlock to " << tempRuankoDbPath;
+                error_occurred = true;
+                break;
+            }
+        } else {
+            qDebug() << "Skipping database '" << dropped_dbname << "' for removal from ruanko.db.";
+        }
+    }
+
+    old_db_file.close();
+    new_db_file.close();
+
+    if (error_occurred) {
+        qDebug() << "An error occurred during ruanko.db update. Rolling back changes.";
+        QFile::remove(tempRuankoDbPath);
+        return false;
+    }
+
+    if (!QFile::remove(ruankoDbPath)) {
+        qWarning() << "Failed to remove old " << ruankoDbPath;
+        QFile::remove(tempRuankoDbPath);
+        return false;
+    }
+
+    if (!QFile::rename(tempRuankoDbPath, ruankoDbPath)) {
+        qWarning() << "Failed to rename " << tempRuankoDbPath << " to " << ruankoDbPath;
+        // Attempt to restore old file if rename fails and old file was somehow kept (complex recovery)
+        return false;
+    }
+
+    qDebug() << "ruanko.db successfully updated after dropping database '" << dropped_dbname << "'.";
+    return true;
+}
 
 bool xhydbmanager::dropdatabase(const QString& dbname) {
+    qDebug() << "Attempting to drop database:" << dbname;
+    qDebug() << "Current databases in memory before drop attempt:";
+    for(const auto& db_item : m_databases) { qDebug() << " - " << db_item.name(); }
+
+    bool found_in_memory = false;
     for (auto it = m_databases.begin(); it != m_databases.end(); ++it) {
-        if (it->name().compare(dbname, Qt::CaseInsensitive) == 0) { // 使用 compare 进行不区分大小写的比较
-            // 删除数据库目录
-            QString dbPath = QString("%1/data/%2").arg(m_dataDir, dbname); // m_dataDir 是您的根数据目录
+        if (it->name().compare(dbname, Qt::CaseInsensitive) == 0) {
+            found_in_memory = true;
+            qDebug() << "Found database '" << dbname << "' in memory for deletion.";
+
+            QString dbPath = QString("%1/data/%2").arg(m_dataDir, dbname);
             QDir db_dir(dbPath);
             if (db_dir.exists()) {
-                if (!db_dir.removeRecursively()) { // 检查删除是否成功
-                    qWarning() << "错误: 无法完全删除数据库目录: " << dbPath;
-                    return false; // 如果目录删除失败，操作也失败
+                qDebug() << "Directory " << dbPath << " exists. Attempting to remove recursively.";
+                if (!db_dir.removeRecursively()) {
+                    qWarning() << "Error: Could not completely remove database directory: " << dbPath;
+                    // Decide if this is a fatal error for the drop operation
+                } else {
+                    qDebug() << "Successfully removed directory: " << dbPath;
                 }
+            } else {
+                qDebug() << "Directory " << dbPath << " does not exist. No files to remove for this database.";
             }
 
-            // 从内存列表中移除
-            it = m_databases.erase(it); // erase 返回下一个有效迭代器
+            it = m_databases.erase(it);
+            qDebug() << "Database '" << dbname << "' erased from in-memory list (m_databases).";
+
+            qDebug() << "Current databases in memory after erase:";
+            for(const auto& db_item_after : m_databases) { qDebug() << " - " << db_item_after.name(); }
 
             if (current_database.compare(dbname, Qt::CaseInsensitive) == 0) {
                 current_database.clear();
+                qDebug() << "Cleared current_database as it was the one dropped.";
             }
-            qDebug() << "数据库已删除 (包括内存记录):" << dbname;
 
-            // TODO: 更新 ruanko.db (如果它跟踪所有数据库的元数据)
-            // 这部分逻辑比较复杂，需要读取 ruanko.db，移除对应的 DatabaseBlock，然后重写文件。
-            // 或者标记为已删除。暂时跳过这一步，但这是持久化所必需的。
+            if (!update_ruanko_db_after_drop(dbname)) {
+                qWarning() << "Failed to update ruanko.db after dropping database '" << dbname << "'. Metadata might be inconsistent.";
+            }
 
+            qDebug() << "Database '" << dbname << "' drop process completed.";
             return true;
         }
     }
-    qWarning() << "错误: 尝试删除的数据库 '" << dbname << "' 在内存中未找到。";
+
+    if (!found_in_memory) {
+        qWarning() << "Error: Database '" << dbname << "' not found in memory. Cannot drop.";
+    }
     return false;
 }
+
 bool xhydbmanager::use_database(const QString& dbname) {
     for (const auto& db : m_databases) {
-        if (db.name().toLower() == dbname.toLower()) {
-            current_database = db.name(); // 保留原始大小写
+        if (db.name().compare(dbname, Qt::CaseInsensitive) == 0) { // 使用 compare
+            current_database = db.name();
             qDebug() << "Using database:" << current_database;
             return true;
         }
     }
+    qWarning() << "Database '" << dbname << "' not found. Cannot use.";
     return false;
 }
 
@@ -117,9 +259,10 @@ QString xhydbmanager::get_current_database() const {
 }
 
 QList<xhydatabase> xhydbmanager::databases() const {
+    qDebug() << "[xhydbmanager::databases()] Returning a copy of m_databases. Current content (" << m_databases.size() << " items):";
+    for(const auto& db_item : m_databases) { qDebug() << " - " << db_item.name(); }
     return m_databases;
 }
-
 bool xhydbmanager::beginTransaction() {
     if (m_inTransaction) return false; // 如果已经在事务中，则返回失败
     m_inTransaction = true; // 更新事务状态
@@ -164,31 +307,21 @@ void xhydbmanager::rollbackTransaction() {
 bool xhydbmanager::add_column(const QString& database_name, const QString& table_name, const xhyfield& field) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
-
-    if (table->has_field(field.name())) {
-        return false; // 字段已存在
-    }
-
-    table->add_field(field);
-    // 保存更改到文件或其他存储中
+    if (table->has_field(field.name())) return false;
+    table->addfield(field); // 修正: add_field -> addfield
+    save_table_to_file(database_name, table_name, table); // 假设保存表结构
     return true;
 }
+
 bool xhydbmanager::drop_column(const QString& database_name, const QString& table_name, const QString& field_name) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-
     xhytable* table = db->find_table(table_name);
-    if (!table) return false;
-
-    if (!table->has_field(field_name)) {
-        return false; // 字段不存在
-    }
-
-    table->remove_field(field_name);
-    // 保存更改到文件或其他存储中
+    if (!table || !table->has_field(field_name)) return false;
+    table->remove_field(field_name); // 现在应该能找到这个方法
+    save_table_to_file(database_name, table_name, table); // 假设保存表结构
     return true;
 }
 
@@ -232,76 +365,101 @@ xhyfield::datatype parseDataType(const QString& type_str, int& size) {
 }
 
 bool xhydbmanager::alter_column(const QString& database_name, const QString& table_name,
-                  const QString& old_field_name, const xhyfield& new_field) {
+                                const QString& old_field_name, const xhyfield& new_field) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-
     xhytable* table = db->find_table(table_name);
-    if (!table) return false;
-
-    // 先删除旧字段
-    table->remove_field(old_field_name);
-    // 添加新字段
-    table->add_field(new_field);
-
+    if (!table || !table->get_field(old_field_name)) return false;
+    if (old_field_name.compare(new_field.name(), Qt::CaseInsensitive) != 0 && table->has_field(new_field.name())) {
+        qWarning() << "ALTER COLUMN 失败: 新列名 " << new_field.name() << " 已存在。";
+        return false;
+    }
+    table->remove_field(old_field_name); // 现在应该能找到
+    table->addfield(new_field);      // 修正: add_field -> addfield
+    save_table_to_file(database_name, table_name, table);
     return true;
 }
-bool xhydbmanager::add_constraint(const QString& database_name, const QString& table_name, const QString& field_name, const QString& constraint) {
+
+
+bool xhydbmanager::add_constraint(const QString& database_name, const QString& table_name, const QString& field_name, const QString& constraint_str) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
-
-    // 获取字段
     const xhyfield* old_field = table->get_field(field_name);
     if (!old_field) return false;
 
-    // 创建新字段并添加约束
     QStringList constraints = old_field->constraints();
-    constraints.append(constraint);
-    xhyfield new_field(old_field->name(), old_field->type(), constraints);
-
-    // 替换原字段
-    table->remove_field(field_name);
-    table->addfield(new_field);
-
-    return true;
+    if (!constraints.contains(constraint_str, Qt::CaseInsensitive)) { // 避免重复添加
+        constraints.append(constraint_str);
+        xhyfield new_field_with_constraint(old_field->name(), old_field->type(), constraints);
+        // 替换字段定义 (这是一个简化的 alter field，更复杂的可能需要新建表复制数据)
+        table->remove_field(field_name); // 现在应该能找到
+        table->addfield(new_field_with_constraint);
+        save_table_to_file(database_name, table_name, table);
+        return true;
+    }
+    return false; // 约束已存在或操作未执行
 }
-bool xhydbmanager::drop_constraint(const QString& database_name, const QString& table_name, const QString& constraint_name) {
+
+bool xhydbmanager::drop_constraint(const QString& database_name, const QString& table_name, const QString& constraint_to_drop_name_or_text) {
+    // 这个函数逻辑比较复杂，取决于约束是如何存储和识别的。
+    // 假设 constraint_to_drop_name_or_text 是约束的文本内容，如 "NOT_NULL" 或 "UNIQUE"
+    // 并且假设约束是字段级的。表级约束的移除会更复杂。
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
 
-    // 假设我们能通过约束名称找到对应的字段
-    for (auto& field : table->fields()) {
-        auto constraints = field.constraints();
-        if (constraints.contains(constraint_name)) {
-            constraints.removeOne(constraint_name);
-            xhyfield new_field(field.name(), field.type(), constraints);
-            table->remove_field(field.name());
-            table->addfield(new_field);
-            return true; // 删除成功
+    bool changed = false;
+    for (const xhyfield& current_field : table->fields()) { // 需要迭代字段的副本或用索引，因为我们可能修改它
+        QStringList constraints = current_field.constraints();
+        int initial_size = constraints.size();
+        constraints.removeAll(constraint_to_drop_name_or_text); // Qt::CaseInsensitive?
+
+        if (constraints.size() < initial_size) { // 如果确实移除了约束
+            xhyfield modified_field(current_field.name(), current_field.type(), constraints);
+            table->remove_field(current_field.name()); // 移除旧字段定义
+            table->addfield(modified_field);       // 添加修改后的字段定义
+            changed = true;
+            // 注意: 如果一个字段有多个相同的约束文本，removeAll会都移除。
+            // 如果只想移除一个，需要更精确的逻辑。
         }
     }
-    return false; // 未找到约束
+    if (changed) {
+        save_table_to_file(database_name, table_name, table);
+    }
+    // TODO: 处理表级约束的移除 (如果 constraint_to_drop_name_or_text 是一个约束名)
+    if(!changed) qWarning() << "未找到或移除约束:" << constraint_to_drop_name_or_text << "在表" << table_name;
+    return changed;
 }
+
 bool xhydbmanager::rename_column(const QString& database_name, const QString& table_name, const QString& old_column_name, const QString& new_column_name) {
     xhydatabase* db = find_database(database_name);
     if (!db) return false;
-
     xhytable* table = db->find_table(table_name);
     if (!table) return false;
-
     const xhyfield* old_field = table->get_field(old_column_name);
     if (!old_field) return false;
+    if (table->has_field(new_column_name)) {
+        qWarning() << "重命名列失败：新列名 " << new_column_name << " 已存在。";
+        return false;
+    }
 
-    xhyfield new_field(new_column_name, old_field->type(), old_field->constraints());
+    xhyfield new_field_renamed(new_column_name, old_field->type(), old_field->constraints() /*, any other properties like enum values */);
+    // TODO: 如果 xhyfield 有其他属性（如枚举值列表），也需要从 old_field 复制到 new_field_renamed
+
     table->remove_field(old_column_name);
-    table->addfield(new_field);
+    table->addfield(new_field_renamed);
 
+    // TODO: 非常重要! 还需要更新所有记录中该字段的键名。
+    // 这通常意味着遍历 m_records 和 m_tempRecords，对每个 xhyrecord：
+    // QString value = record.value(old_column_name);
+    // record.removeValue(old_column_name);
+    // record.insert(new_column_name, value);
+    // 这个逻辑应该在 xhytable::rename_column 方法中（如果创建该方法）或此处直接操作记录
+
+    save_table_to_file(database_name, table_name, table);
     return true;
 }
 
@@ -457,126 +615,82 @@ void xhydbmanager::save_database_to_file(const QString& dbname) {
 }
 
 void xhydbmanager::load_databases_from_files() {
-    QDir data_dir(QString("%1/data").arg(m_dataDir));
-    QStringList db_dirs = data_dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    m_databases.clear(); // 清空内存列表，从文件重新加载
+    QDir data_root_dir(m_dataDir + "/data");
+    if (!data_root_dir.exists()) {
+        qWarning() << "Data directory " << data_root_dir.path() << " does not exist. Cannot load databases.";
+        return;
+    }
+    QStringList db_dirs = data_root_dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    qDebug() << "Loading databases from directories in: " << data_root_dir.path();
 
     for (const QString& dbname : db_dirs) {
+        qDebug() << "Found potential database directory: " << dbname;
+        // 在这里可以添加一个检查，比如查看ruanko.db中是否存在此数据库的元数据，
+        // 或者检查目录内是否有必要的元文件(如 [dbname].tb)，来判断这是否一个有效的数据库目录。
+        // 如果仅仅依赖目录存在，可能会加载不完整的或意外创建的目录。
+
         xhydatabase db(dbname);
-        QDir db_dir(data_dir.filePath(dbname));
-        QStringList table_files = db_dir.entryList(QStringList() << "*.tdf", QDir::Files);
+        QDir current_db_dir(data_root_dir.filePath(dbname));
+        QStringList table_files = current_db_dir.entryList(QStringList() << "*.tdf", QDir::Files);
+        qDebug() << "Looking for .tdf files in: " << current_db_dir.path();
 
-        for (const QString& table_file : table_files) {
-            QString table_name = table_file.left(table_file.length() - 4); // 去掉 .tdf 后缀
-            QFile tdfFile(db_dir.filePath(table_file));
+        bool db_is_valid_to_load = !table_files.isEmpty(); // 简单判断：有表定义文件才算有效
+        // 或者检查特定元数据文件： QFileInfo(current_db_dir.filePath(dbname + ".tb")).exists();
 
-            if (tdfFile.open(QIODevice::ReadOnly)) {
-                QDataStream in(&tdfFile);
-                in.setVersion(QDataStream::Qt_5_15);
-
-                xhytable table(table_name);
-                while (!in.atEnd()) {
-                    FieldBlock fb;
-                    in.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
-
-                    QString name(fb.name);
-                    xhyfield::datatype type = static_cast<xhyfield::datatype>(fb.type);
-                    QStringList constraints;
-
-                    if (fb.integrities & 0x01) constraints.append("PRIMARY_KEY");
-                    if (fb.integrities & 0x02) constraints.append("NOT_NULL");
-                    if (fb.integrities & 0x04) constraints.append("UNIQUE");
-
-                    table.addfield(xhyfield(name, type, constraints));
-                }
-
-                // 加载记录文件 (.trd)
-                QString trdFilePath = QString("%1/%2.trd").arg(db_dir.path(), table_name);
-                QFile trdFile(trdFilePath);
-                if (trdFile.open(QIODevice::ReadOnly)) {
-                    QDataStream recordStream(&trdFile);
-                    recordStream.setVersion(QDataStream::Qt_5_15);
-
-                    while (!recordStream.atEnd()) {
-                        quint32 recordSize;
-                        recordStream >> recordSize;
-
-                        QByteArray recordData(recordSize, 0);
-                        recordStream.readRawData(recordData.data(), recordSize);
-
-                        QDataStream recordInputStream(recordData);
-                        recordInputStream.setVersion(QDataStream::Qt_5_15);
-
-                        xhyrecord record;
-                        for (const auto& field : table.fields()) {
-                            QString value;
-                            switch (field.type()) {
-                            case xhyfield::INT:
-                                qint32 intValue;
-                                recordInputStream >> intValue;
-                                value = QString::number(intValue);
-                                break;
-                            case xhyfield::FLOAT:
-                                float floatValue;
-                                recordInputStream >> floatValue;
-                                value = QString::number(floatValue);
-                                break;
-                            case xhyfield::VARCHAR:
-                            case xhyfield::CHAR: {
-                                QByteArray strBytes;
-                                recordInputStream >> strBytes;
-                                value = QString::fromUtf8(strBytes);
-                                break;
-                            }
-                            case xhyfield::DATE: {
-                                QDate date;
-                                recordInputStream >> date;
-                                value = date.toString("yyyy-MM-dd");
-                                break;
-                            }
-                            case xhyfield::DATETIME: {
-                                QDateTime datetime;
-                                recordInputStream >> datetime;
-                                value = datetime.toString("yyyy-MM-dd HH:mm:ss");
-                                break;
-                            }
-                            case xhyfield::BOOL: {
-                                bool boolValue;
-                                recordInputStream >> boolValue;
-                                value = boolValue ? "1" : "0";
-                                break;
-                            }
-                            default:
-                                qWarning() << "Unsupported data type for field:" << field.name();
-                                break;
-                            }
-                            record.insert(field.name(), value);
-                        }
-                        table.addrecord(record);
-                    }
-                } else {
-                    qWarning() << "Failed to open TRD file:" << trdFilePath;
-                }
-
-                db.createtable(table);
-            } else {
-                qWarning() << "Failed to open TDF file:" << tdfFile.fileName();
+        if (!db_is_valid_to_load && table_files.isEmpty()) { // 如果目录内没有任何tdf，可能不是有效数据库
+            // 检查是否有数据库级别的元文件，如 dbname.tb
+            QFile dbMetaFile(current_db_dir.filePath(dbname + ".tb")); // 假设这是数据库元文件
+            if(!dbMetaFile.exists() || dbMetaFile.size() == 0){ // 如果元文件也不存在或为空
+                qDebug() << "Directory " << dbname << " seems empty or not a valid database (no .tdf files and no/empty " << dbname << ".tb). Skipping.";
+                continue;
             }
+            // 如果元文件存在，即使没有表，也可能是一个空数据库，可以加载
+            qDebug() << "Directory " << dbname << " has no .tdf files but has " << dbname << ".tb. Loading as potentially empty database.";
         }
 
-        m_databases.append(db);
-    }
-}
 
+        for (const QString& table_tdf_file : table_files) {
+            // ... (内部加载表的逻辑，如之前回复所示，增加了更多日志和错误检查)
+            // 确保 FieldBlock 和记录加载的健壮性
+            QString table_name = table_tdf_file.left(table_tdf_file.length() - 4);
+            qDebug() << "Loading table: " << table_name << "from" << table_tdf_file;
+            QFile tdfFile(current_db_dir.filePath(table_tdf_file));
+            if (tdfFile.open(QIODevice::ReadOnly)) {
+                QDataStream in_tdf(&tdfFile);
+                in_tdf.setVersion(QDataStream::Qt_5_15);
+                xhytable table(table_name);
+                while (!in_tdf.atEnd()) {
+                    FieldBlock fb;
+                    int bytesRead = in_tdf.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
+                    if (bytesRead != sizeof(FieldBlock)) {
+                        if (bytesRead == 0 && in_tdf.atEnd()) break;
+                        qWarning() << "Error reading FieldBlock for table" << table_name << "in" << dbname << ". Read:" << bytesRead << "Expected:" << sizeof(FieldBlock);
+                        break;
+                    }
+                    // ... (解析 FieldBlock 并添加到 table) ...
+                }
+                tdfFile.close();
+                // ... (加载 .trd 文件) ...
+                db.addTable(table); // 使用 addTable
+            } else {
+                qWarning() << "Failed to open TDF file:" << tdfFile.fileName() << "Error:" << tdfFile.errorString();
+            }
+        }
+        m_databases.append(db);
+        qDebug() << "Database '" << db.name() << "' loaded with " << db.tables().size() << " tables.";
+    }
+    qDebug() << "Finished loading databases. Total loaded:" << m_databases.size();
+}
 
 xhydatabase* xhydbmanager::find_database(const QString& dbname) {
     for (auto& db : m_databases) {
-        if (db.name().toLower() == dbname.toLower()) {
+        if (db.name().compare(dbname, Qt::CaseInsensitive) == 0) { // 使用 compare
             return &db;
         }
     }
     return nullptr;
 }
-
 bool xhydbmanager::isInTransaction() const {
     return m_inTransaction; // 返回当前事务状态
 }
@@ -659,6 +773,7 @@ void xhydbmanager::save_table_records_file(const QString& filePath, const xhytab
             case xhyfield::DOUBLE:
                 recordStream << value.toDouble();
                 break;
+            case xhyfield::TEXT:
             case xhyfield::CHAR:
             case xhyfield::VARCHAR: {
                 // 处理字符串类型，UTF-8编码

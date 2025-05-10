@@ -12,6 +12,7 @@ public:
     QMap<QString, QString> allValues() const; // 新增
     void clear();                             // 新增
 
+    void removeValue(const QString &field);
 private:
     QMap<QString, QString> m_data;
 };

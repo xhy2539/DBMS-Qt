@@ -54,15 +54,25 @@ bool xhydatabase::createtable(const xhytable& table_data) {
 }
 
 bool xhydatabase::droptable(const QString& tablename) {
+    qDebug() << "[xhydatabase::droptable] Attempting to drop table:" << tablename << "from database:" << m_name;
+    qDebug() << "  Tables before drop in '" << m_name << "' (" << m_tables.size() << " items):";
+    for(const auto& tbl : m_tables) { qDebug() << "    - " << tbl.name(); }
+
     for (auto it = m_tables.begin(); it != m_tables.end(); ++it) {
         if (it->name().compare(tablename, Qt::CaseInsensitive) == 0) {
-            it = m_tables.erase(it);
-            qDebug() << "表 '" << tablename << "' 已从数据库 '" << m_name << "' 中删除。";
+            qDebug() << "  Found table '" << tablename << "' in database '" << m_name << "' for erase.";
+            it = m_tables.erase(it); // 关键操作
+            qDebug() << "  Table '" << tablename << "' erased from m_tables list.";
+
+            qDebug() << "  Tables after drop in '" << m_name << "' (" << m_tables.size() << " items):";
+            for(const auto& tbl_after : m_tables) { qDebug() << "    - " << tbl_after.name(); }
+
             m_indexes.removeIf([&](const xhyindex& idx){ return idx.tableName().compare(tablename, Qt::CaseInsensitive) == 0; });
+            qDebug() << "  Associated indexes for table '" << tablename << "' removed.";
             return true;
         }
     }
-    qWarning() << "删除表失败：表 '" << tablename << "' 在数据库 '" << m_name << "' 中未找到。";
+    qWarning() << "  Delete table failed: Table '" << tablename << "' not found in database '" << m_name << "'.";
     return false;
 }
 
@@ -120,10 +130,12 @@ void xhydatabase::clearTables() {
 
 void xhydatabase::addTable(const xhytable& table) {
     if (has_table(table.name())) {
-        qWarning() << "尝试添加已存在的表 '" << table.name() << "' 到数据库 '" << m_name << "'";
+        qWarning() << "[xhydatabase::addTable] Attempting to add existing table '" << table.name()
+        << "' to database '" << m_name << "' (likely during load). Skipping this duplicate instance.";
         return;
     }
     m_tables.append(table);
+    qDebug() << "[xhydatabase::addTable] Table '" << table.name() << "' added to database '" << m_name << "' in memory.";
 }
 
 

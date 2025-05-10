@@ -17,6 +17,7 @@
 #include "viewlist.h"
 #include "functionlist.h"
 #include "querylist.h"
+#include "tableshow.h"
 
 struct Database{
     QString database;
@@ -113,6 +114,7 @@ private:
     void updateList(QString currentDb);
     void handleItemClicked(QTreeWidgetItem *item, int column);
     void handleItemDoubleClicked(QTreeWidgetItem *item, int column);
+    void openTable(QString tableName);
     void handleString(const QString& text, queryWidget* querywidget);
 };
 #endif // MAINWINDOW_H

@@ -28,3 +28,7 @@ void queryWidget::setPlainText(const QString& text){
 void queryWidget::appendPlainText(const QString& text){
     ui->show->appendPlainText(text);
 }
+
+void queryWidget::putin_focus(){
+    ui->putin->setFocus();
+}

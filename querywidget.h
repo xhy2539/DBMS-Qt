@@ -17,6 +17,7 @@ public:
     void clear();
     void setPlainText(const QString& text);
     void appendPlainText(const QString& text);
+    void putin_focus();
 signals:
     void sendString(const QString& text);
 

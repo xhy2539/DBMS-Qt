@@ -6,6 +6,7 @@ tableList::tableList(QWidget *parent)
     , ui(new Ui::tableList)
 {
     ui->setupUi(this);
+
 }
 
 tableList::~tableList()
@@ -24,3 +25,20 @@ void tableList::addItem(QString item){
 void tableList::addItems(QList<QString> items){
     ui->listWidget->addItems(items);
 }
+
+void tableList::on_listWidget_itemDoubleClicked(QListWidgetItem *item)
+{
+    emit tableOpen(item->text());
+}
+
+void tableList::on_pushButton_released()
+{
+    emit tableOpen(current_itemName);
+}
+
+
+void tableList::on_listWidget_itemClicked(QListWidgetItem *item)
+{
+    current_itemName = item->text();
+}
+

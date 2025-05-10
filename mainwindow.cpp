@@ -19,8 +19,6 @@
 #include <stdexcept> // 包含 stdexcept
 #include <limits>    // 用于 std::numeric_limits
 #include <QRegularExpressionMatchIterator>
-#include "tableshow.h"
-
 
 MainWindow::MainWindow(const QString &name,QWidget *parent)
     : QMainWindow(parent)
@@ -69,6 +67,7 @@ MainWindow::MainWindow(const QString &name,QWidget *parent)
     // popup->showPopup();
     connect(ui->treeWidget, &QTreeWidget::itemClicked, this, &MainWindow::handleItemClicked);
     connect(ui->treeWidget, &QTreeWidget::itemDoubleClicked, this, &MainWindow::handleItemDoubleClicked);
+    connect(tablelist,&tableList::tableOpen,this ,&MainWindow::openTable);
 }
 
 MainWindow::~MainWindow()
@@ -1636,25 +1635,128 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
     current_query->appendPlainText(output.trimmed());
 }
 // ENDE von mainwindow.cpp
+///////////////////////////////////////////////////
 //GUI
 
-void MainWindow::dataSearch(){
-    GUI_dbms = {
-        {
-            "数据库1",
-            {"student", "teacher"},  // 表
-            {"view1", "view2"},      // 视图
-            {"func1"},              // 函数
-            {"query1", "query2"}    // 查询
-        },
-        {
-            "数据库2",
-            {"order", "product"},    // 表
-            {"sales_view"},         // 视图
-            {"calculate_total"},    // 函数
-            {}      // 查询
+void MainWindow::on_tableButton_released()
+{
+    ui->tableButton->setEnabled(false);
+    ui->viewButton->setEnabled(true);
+    ui->functionButton->setEnabled(true);
+    ui->queryButton->setEnabled(true);
+
+    ui->tabWidget->removeTab(0);
+    ui->tabWidget->insertTab(0,tablelist,"对象");
+    ui->tabWidget->setCurrentIndex(0);
+    if (tabBar) {
+        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
+        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
+        if (closeButton) {
+            closeButton->setVisible(false);
         }
-    };
+    }
+}
+
+void MainWindow::on_viewButton_released()
+{
+    ui->tableButton->setEnabled(true);
+    ui->viewButton->setEnabled(false);
+    ui->functionButton->setEnabled(true);
+    ui->queryButton->setEnabled(true);
+
+    ui->tabWidget->removeTab(0);
+    ui->tabWidget->insertTab(0,viewlist,"对象");
+    ui->tabWidget->setCurrentIndex(0);
+    if (tabBar) {
+        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
+        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
+        if (closeButton) {
+            closeButton->setVisible(false);
+        }
+    }
+}
+
+void MainWindow::on_functionButton_released()
+{
+    ui->tableButton->setEnabled(true);
+    ui->viewButton->setEnabled(true);
+    ui->functionButton->setEnabled(false);
+    ui->queryButton->setEnabled(true);
+
+    ui->tabWidget->removeTab(0);
+    ui->tabWidget->insertTab(0,functionlist,"对象");
+    ui->tabWidget->setCurrentIndex(0);
+    if (tabBar) {
+        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
+        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
+        if (closeButton) {
+            closeButton->setVisible(false);
+        }
+    }
+}
+
+void MainWindow::on_queryButton_released()
+{
+    ui->tableButton->setEnabled(true);
+    ui->viewButton->setEnabled(true);
+    ui->functionButton->setEnabled(true);
+    ui->queryButton->setEnabled(false);
+
+    ui->tabWidget->removeTab(0);
+    ui->tabWidget->insertTab(0,querylist,"对象");
+    ui->tabWidget->setCurrentIndex(0);
+    if (tabBar) {
+        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
+        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
+        if (closeButton) {
+            closeButton->setVisible(false);
+        }
+    }
+}
+
+
+void MainWindow::on_tabWidget_tabCloseRequested(int index)
+{
+    QWidget* widget = ui->tabWidget->widget(index);
+    ui->tabWidget->removeTab(index);
+    widget->deleteLater();
+}
+
+
+void MainWindow::dataSearch(){
+    for(xhydatabase database: db_manager.databases()){
+        Database gui_database = {database.name()};
+
+        QStringList gui_tables;
+        QStringList gui_views;
+        QStringList gui_functions;
+        QStringList gui_queries;
+
+        for(xhytable table : database.tables()){
+            gui_tables.append(table.name());
+        }
+        gui_database.tables=gui_tables;
+
+
+        GUI_dbms.append(gui_database);
+    }
+
+    // GUI_dbms = {
+    //     {
+    //         "数据库1",
+    //         {"student", "teacher"},  // 表
+    //         {"view1", "view2"},      // 视图
+    //         {"func1"},              // 函数
+    //         {"query1", "query2"}    // 查询
+    //     },
+    //     {
+    //         "数据库2",
+    //         {"order", "product"},    // 表
+    //         {"sales_view"},         // 视图
+    //         {"calculate_total"},    // 函数
+    //         {}      // 查询
+    //     }
+    // };
 }
 
 void MainWindow::buildTree(){
@@ -1771,13 +1873,13 @@ void MainWindow::handleItemClicked(QTreeWidgetItem *item, int column)
 void MainWindow::handleItemDoubleClicked(QTreeWidgetItem *item, int column){
     if(item->parent() == nullptr){
 
-
         return;
     }
     QString parentText = item->parent()->text(0);
     if(parentText == "表"){
-        tableShow *tableshow = new tableShow;
-        ui->tabWidget->addTab(tableshow,item->text(0)+" @"+current_GUI_Db);
+
+        QString tablename = item->text(0);
+
         //tableshow->
 
     }else if(parentText == "视图"){
@@ -1786,6 +1888,29 @@ void MainWindow::handleItemDoubleClicked(QTreeWidgetItem *item, int column){
 
     }else if(parentText == "查询"){
 
+    }
+}
+
+void MainWindow::openTable(QString tableName){
+    for(int i=0; i < ui->tabWidget->count(); ++i){
+        if(tableName+" @"+current_GUI_Db == ui->tabWidget->tabText(i)){
+            return;
+        }
+    }
+    tableShow *tableshow = new tableShow;
+    ui->tabWidget->addTab(tableshow,tableName+" @"+current_GUI_Db);
+    ui->tabWidget->setCurrentWidget(tableshow);
+
+    for(xhydatabase database : db_manager.databases()){
+        if(database.name() == current_GUI_Db){
+            for(xhytable table : database.tables()){
+                if(table.name() == tableName){
+
+                    tableshow->setTable(table);
+                    return ;
+                }
+            }
+        }
     }
 }
 
@@ -1841,89 +1966,7 @@ void MainWindow::on_addQuery_released()
     connect(query,&queryWidget::sendString,[=](const QString& text){
         handleString(text,query);
     });
-}
-
-void MainWindow::on_tableButton_released()
-{
-    ui->tableButton->setEnabled(false);
-    ui->viewButton->setEnabled(true);
-    ui->functionButton->setEnabled(true);
-    ui->queryButton->setEnabled(true);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,tablelist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-void MainWindow::on_viewButton_released()
-{
-    ui->tableButton->setEnabled(true);
-    ui->viewButton->setEnabled(false);
-    ui->functionButton->setEnabled(true);
-    ui->queryButton->setEnabled(true);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,viewlist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-void MainWindow::on_functionButton_released()
-{
-    ui->tableButton->setEnabled(true);
-    ui->viewButton->setEnabled(true);
-    ui->functionButton->setEnabled(false);
-    ui->queryButton->setEnabled(true);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,functionlist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-void MainWindow::on_queryButton_released()
-{
-    ui->tableButton->setEnabled(true);
-    ui->viewButton->setEnabled(true);
-    ui->functionButton->setEnabled(true);
-    ui->queryButton->setEnabled(false);
-
-    ui->tabWidget->removeTab(0);
-    ui->tabWidget->insertTab(0,querylist,"对象");
-    ui->tabWidget->setCurrentIndex(0);
-    if (tabBar) {
-        // 定位关闭按钮的位置（通常为右侧，具体取决于样式）
-        QWidget *closeButton = tabBar->tabButton(0, QTabBar::RightSide);
-        if (closeButton) {
-            closeButton->setVisible(false);
-        }
-    }
-}
-
-
-void MainWindow::on_tabWidget_tabCloseRequested(int index)
-{
-    QWidget* widget = ui->tabWidget->widget(index);
-    ui->tabWidget->removeTab(index);
-    widget->deleteLater();
+    ui->tabWidget->setCurrentWidget(query);
+    query->putin_focus();
 }
 

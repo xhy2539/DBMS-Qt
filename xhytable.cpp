@@ -33,7 +33,6 @@ void xhytable::addfield(const xhyfield& field) {
             }
     }
     m_fields.append(field);
-    rebuildIndexes();
 }
 bool xhytable::has_field(const QString& field_name) const {
     for (const auto& field : m_fields) {

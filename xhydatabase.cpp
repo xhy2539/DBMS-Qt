@@ -43,14 +43,34 @@ bool xhydatabase::has_table(const QString& table_name) const {
     return false;
 }
 
-bool xhydatabase::createtable(const xhytable& table_data) {
-    if (has_table(table_data.name())) {
-        qWarning() << "创建表失败：表 '" << table_data.name() << "' 在数据库 '" << m_name << "' 中已存在。";
+bool xhydatabase::createtable(const xhytable& table_data_const) {
+    if (has_table(table_data_const.name())) {
+        qWarning() << "创建表失败：表 '" << table_data_const.name() << "' 在数据库 '" << m_name << "' 中已存在。";
         return false;
     }
-    m_tables.append(table_data);
-    qDebug() << "表 '" << table_data.name() << "' 已成功创建在数据库 '" << m_name << "'。";
+    // 创建表对象时，将 this (当前 xhydatabase 实例) 作为父数据库指针传递
+    xhytable newTable(table_data_const.name(), this);
+    // 使用 table_data_const 的数据（元数据和记录）来初始化 newTable
+    // 假设 xhytable::createtable 是一个深拷贝/元数据复制方法
+    if (!newTable.createtable(table_data_const)) {
+        qWarning() << "通过元数据复制创建表 '" << table_data_const.name() << "' 内部失败。";
+        return false;
+    }
+    // newTable.setParentDb(this); // 另一种设置方式，如果在构造函数中未设置
+
+    m_tables.append(newTable);
+    qDebug() << "表 '" << newTable.name() << "' 已成功创建在数据库 '" << m_name << "' 并设置了父数据库引用。";
     return true;
+}
+
+void xhydatabase::addTable(xhytable& table) { // 修改为接收引用
+    if (has_table(table.name())) {
+        qWarning() << "尝试添加已存在的表 '" << table.name() << "' 到数据库 '" << m_name << "'";
+        return;
+    }
+    table.setParentDb(this); // 关键：设置表的父数据库指针
+    m_tables.append(table);
+    qDebug() << "表 '" << table.name() << "' 已添加到数据库 '" << m_name << "' 并设置了父数据库引用。";
 }
 
 bool xhydatabase::droptable(const QString& tablename) {

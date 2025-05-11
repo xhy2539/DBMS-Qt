@@ -45,7 +45,7 @@ public:
     bool selectData(const QString& tablename,
                     const ConditionNode &conditions,
                     QVector<xhyrecord>& results) const; // 改为 const
-
+    void addTable(xhytable& table);
     // 索引操作
     bool createIndex(const xhyindex& idx);
     bool dropIndex(const QString& indexName);

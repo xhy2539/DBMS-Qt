@@ -410,15 +410,32 @@ void xhydbmanager::rollback() {
 }
 
 bool xhydbmanager::createtable(const QString& dbname, const xhytable& table) {
-    for (auto& db : m_databases) {
-        if (db.name().toLower() == dbname.toLower()) {
-            if (db.createtable(table)) {
-                save_table_to_file(dbname, table.name(), db.find_table(table.name()));
-                return true;
-            }
-        }
+    xhydatabase* db = find_database(dbname);
+    if (!db) {
+        qWarning() << "错误: 数据库 '" << dbname << "' 未找到，无法创建表。";
+         throw std::runtime_error(("数据库 '" + dbname + "' 未找到。").toStdString());
+        return false;
     }
-    return false;
+
+    // 调用 xhydatabase::createtable。这个方法内部会创建 xhytable 实例，
+    // 并将 xhydatabase 自身的 'this' 指针作为父数据库传递给 xhytable 的构造函数。
+    if (db->createtable(table)) {
+        // 持久化新创建的表
+        const xhytable* new_table_ptr = db->find_table(table.name());
+        if (new_table_ptr) {
+            save_table_to_file(dbname, new_table_ptr->name(), new_table_ptr);
+            qDebug() << "表 '" << new_table_ptr->name() << "' 在数据库 '" << dbname << "' 中创建并已保存。";
+            return true;
+        } else {
+            qWarning() << "严重错误：表在数据库中创建成功，但在回找时失败。文件未保存。";
+            // 可能需要回滚内存中的表创建操作（如果xhydatabase支持）
+            return false;
+        }
+    } else {
+        // xhydatabase::createtable 内部可能因为表已存在等原因失败
+        qWarning() << "在数据库 '" << dbname << "' 中创建表 '" << table.name() << "' 失败 (可能已存在或定义无效)。";
+        return false;
+    }
 }
 
 bool xhydbmanager::droptable(const QString& dbname, const QString& tablename) {
@@ -505,27 +522,36 @@ void xhydbmanager::save_database_to_file(const QString& dbname) {
 }
 
 void xhydbmanager::load_databases_from_files() {
-    QDir data_dir(QString("%1/data").arg(m_dataDir));
+    QDir data_dir(m_dataDir + "/data"); // 确保 m_dataDir 已正确初始化
     if (!data_dir.exists()) {
         qWarning() << "[LOAD_DB] Data directory " << data_dir.absolutePath() << " does not exist. No databases to load.";
-        return;
+        if (!data_dir.mkpath(".")) {
+            qWarning() << "[LOAD_DB] Failed to create data directory " << data_dir.absolutePath();
+            return;
+        }
+        qDebug() << "[LOAD_DB] Created data directory " << data_dir.absolutePath();
     }
     QStringList db_dirs = data_dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
 
-    m_databases.clear(); // Clear in-memory list before loading
+    m_databases.clear(); // 清空内存中的数据库列表
 
     for (const QString& dbname : db_dirs) {
-        xhydatabase db(dbname); // In-memory database object
-        QDir db_dir_path(data_dir.filePath(dbname)); // Path to this database's directory
-        QStringList tdf_files = db_dir_path.entryList(QStringList() << "*.tdf", QDir::Files);
+        // 在将表添加到数据库之前，先创建数据库对象并将其添加到管理器
+        xhydatabase databaseObj(dbname); // 创建数据库对象
+        m_databases.append(databaseObj); // 添加到管理器列表
+        xhydatabase* currentDbPtr = &m_databases.last(); // 获取指向刚添加的数据库对象的指针
 
+        QDir db_dir_path(data_dir.filePath(dbname));
+        QStringList tdf_files = db_dir_path.entryList(QStringList() << "*.tdf", QDir::Files);
         qDebug() << "[LOAD_DB] Loading database from directory:" << db_dir_path.path();
 
         for (const QString& tdf_filename : tdf_files) {
-            QString current_table_name = tdf_filename.left(tdf_filename.length() - 4); // "tablename.tdf" -> "tablename"
+            QString current_table_name = tdf_filename.left(tdf_filename.length() - 4);
             qDebug() << "  [LOAD_DB] Attempting to load table:" << current_table_name;
-            xhytable table(current_table_name); // In-memory table object
-            bool tdf_load_successful = true; // Flag for TDF loading status
+
+            // 创建表对象时，传递父数据库指针
+            xhytable table(current_table_name, currentDbPtr);
+            bool tdf_load_successful = true;
 
             // --- Load Table Definition (.tdf) ---
             QFile tdfFile(db_dir_path.filePath(tdf_filename));
@@ -533,61 +559,114 @@ void xhydbmanager::load_databases_from_files() {
                 QDataStream tdf_in_stream(&tdfFile);
                 tdf_in_stream.setVersion(QDataStream::Qt_5_15);
 
-                while (!tdf_in_stream.atEnd()) {
+                // 可选：如果保存了字段数量，先读取并用于循环或验证
+                // quint32 numFieldsExpected;
+                // tdf_in_stream >> numFieldsExpected;
+                // for (quint32 fieldIdx = 0; fieldIdx < numFieldsExpected; ++fieldIdx) { ... }
+
+                while (!tdf_in_stream.atEnd()) { // 循环读取字段块，直到遇到外键数量标记或文件尾
+                    // 尝试读取一个FieldBlock，如果失败（例如到达文件尾或读取不完整），则跳出
+                    // 这个检查点是为了在字段块读完后，流指针指向外键数量
+                    qint64 currentPos = tdfFile.pos();
+                    if (currentPos + static_cast<qint64>(sizeof(FieldBlock)) > tdfFile.size() &&
+                        currentPos + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
+                        // 剩余空间不足以容纳一个 FieldBlock，但可能足以容纳 quint32 (外键数量)
+                        // 这表示字段块可能已读取完毕
+                        break;
+                    }
+                    if (currentPos >= tdfFile.size()) break; // 已到文件末尾
+
                     FieldBlock fb;
                     int bytesRead = tdf_in_stream.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
 
-                    if (bytesRead == 0 && tdf_in_stream.atEnd()) break; // Clean end of file
+                    if (bytesRead == 0 && tdf_in_stream.atEnd()) break;
                     if (bytesRead < static_cast<int>(sizeof(FieldBlock))) {
-                        qWarning() << "  [LOAD_DB] TDF read error for table '" << current_table_name << "'. Expected " << sizeof(FieldBlock) << ", got " << bytesRead << ". Stream status: " << tdf_in_stream.status();
-                        tdf_load_successful = false; // Mark TDF load as failed
-                        break; // Exit TDF field reading loop
+                        if (tdf_in_stream.atEnd() && bytesRead > 0 && bytesRead < static_cast<int>(sizeof(quint32)) ) {
+                            // 如果文件末尾的字节数小于一个 quint32，说明没有外键数量信息，可能是旧格式文件
+                            qDebug() << "  [LOAD_DB_TDF] Reached end of file after reading partial data for table '" << current_table_name << "', assuming no FKs or old format.";
+                            tdf_load_successful = true; // 允许部分成功，没有FKs
+                            break;
+                        }
+                        qWarning() << "  [LOAD_DB_TDF] TDF read error for field block in table '" << current_table_name << "'. Expected " << sizeof(FieldBlock) << ", got " << bytesRead;
+                        tdf_load_successful = false;
+                        break;
                     }
 
                     QString field_name_str = QString::fromUtf8(fb.name, strnlen(fb.name, sizeof(fb.name)));
+                    if (field_name_str.isEmpty()) { // 可能读到了文件末尾的填充或无效数据
+                        qDebug() << "  [LOAD_DB_TDF] Encountered empty field name, assuming end of field blocks for " << current_table_name;
+                        // 把流指针回退到 fb 开始的位置，因为这可能不是一个有效的 fb
+                        tdfFile.seek(currentPos);
+                        break;
+                    }
+
                     xhyfield::datatype type = static_cast<xhyfield::datatype>(fb.type);
                     QStringList constraints;
-
                     if (fb.integrities & 0x01) constraints.append("PRIMARY_KEY");
                     if (fb.integrities & 0x02) constraints.append("NOT_NULL");
-                    if (fb.integrities & 0x04) constraints.append("UNIQUE");
+                    if (fb.integrities & 0x04) constraints.append("UNIQUE"); // 字段级 UNIQUE
 
-                    if (type == xhyfield::CHAR || type == xhyfield::VARCHAR) {
-                        if (fb.param > 0) {
-                            constraints.append(QString("SIZE(%1)").arg(fb.param));
-                        } else if (type == xhyfield::CHAR) {
-                            constraints.append(QString("SIZE(1)"));
-                        }
-                    } else if (type == xhyfield::DECIMAL) {
-                        if (fb.param > 0) {
-                            constraints.append(QString("PRECISION(%1)").arg(fb.param));
-                            constraints.append(QString("SCALE(%1)").arg(fb.size));
-                        }
+                    // 根据 fb.param 和 fb.size 添加 SIZE, PRECISION, SCALE 约束
+                    if ((type == xhyfield::CHAR || type == xhyfield::VARCHAR) && fb.param > 0) {
+                        constraints.append(QString("SIZE(%1)").arg(fb.param));
+                    } else if (type == xhyfield::DECIMAL && fb.param > 0) { // fb.param 是精度 P
+                        constraints.append(QString("PRECISION(%1)").arg(fb.param));
+                        constraints.append(QString("SCALE(%1)").arg(fb.size)); // fb.size 是标度 S
                     }
-                    qDebug() << "    [LOAD_DB_TDF] Loaded field def: '" << field_name_str << "' TypeID:" << static_cast<int>(type) << " Param:" << fb.param << " Size:" << fb.size << " Constraints:" << constraints.join(",");
-
-                    xhyfield new_field(field_name_str, type, constraints);
-                    table.addfield(new_field);
+                    table.addfield(xhyfield(field_name_str, type, constraints));
                 } // End while TDF fields
+
+                // 读取外键信息
+                if (tdf_load_successful && !tdfFile.atEnd()) { // 如果字段加载成功且文件未结束
+                    quint32 numForeignKeys = 0; // 初始化
+                    if (tdfFile.pos() + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
+                        tdf_in_stream >> numForeignKeys;
+                    } else if (!tdfFile.atEnd()){
+                        qWarning() << "    [LOAD_DB_TDF] Not enough data left to read foreign key count for " << current_table_name;
+                        // tdf_load_successful = false; // 可选：标记为失败
+                    }
+
+
+                    if (tdf_in_stream.status() == QDataStream::Ok && numForeignKeys > 0) {
+                        qDebug() << "    [LOAD_DB_TDF] Expecting" << numForeignKeys << "foreign key definitions for table" << current_table_name;
+                        for (quint32 i = 0; i < numForeignKeys; ++i) {
+                            QString constraintName, fk_column, refTable, refColumn;
+                            // QString onDelete, onUpdate; // 如果保存了规则
+                            tdf_in_stream >> constraintName >> fk_column >> refTable >> refColumn;
+                            // tdf_in_stream >> onDelete >> onUpdate;
+
+                            if (tdf_in_stream.status() == QDataStream::Ok) {
+                                table.add_foreign_key(fk_column, refTable, refColumn, constraintName);
+                                // table.setForeignKeyActions(constraintName, onDelete, onUpdate); // 如果支持
+                                qDebug() << "      [LOAD_DB_TDF_FK] Loaded FK:" << constraintName;
+                            } else {
+                                qWarning() << "    [LOAD_DB_TDF] Error reading foreign key definition " << (i + 1) << " for " << current_table_name;
+                                tdf_load_successful = false; break;
+                            }
+                        }
+                    } else if (tdf_in_stream.status() != QDataStream::Ok && numForeignKeys > 0) { // 流错误但期望有FK
+                        qWarning() << "    [LOAD_DB_TDF] Stream error while trying to read foreign key count for " << current_table_name;
+                        tdf_load_successful = false;
+                    } else if (numForeignKeys == 0) {
+                        qDebug() << "    [LOAD_DB_TDF] Table " << current_table_name << " has 0 foreign keys defined in TDF.";
+                    }
+                } else if (tdf_load_successful && tdfFile.atEnd()) {
+                    qDebug() << "    [LOAD_DB_TDF] Reached end of TDF for " << current_table_name << " after field blocks, no FK count found (or 0 FKs).";
+                }
                 tdfFile.close();
-            } else {
+            } else { // TDF 文件打开失败
                 qWarning() << "  [LOAD_DB] Failed to open TDF file:" << tdfFile.fileName() << ". Skipping table.";
-                tdf_load_successful = false; // Mark TDF load as failed
+                tdf_load_successful = false;
             }
 
             if (!tdf_load_successful) {
                 qWarning() << "  [LOAD_DB] Skipping TRD load for table '" << current_table_name << "' due to TDF load error.";
-                continue; // Skip to the next TDF file (next table)
+                continue; // 跳过此表，处理下一个TDF文件
             }
-
-            if (table.fields().isEmpty()) {
+            if (table.fields().isEmpty()) { // 即使TDF加载“成功”，但没有字段定义，也是无效的表
                 qWarning() << "  [LOAD_DB] Table '" << current_table_name << "' has no fields defined after TDF load. Skipping TRD load.";
-                // Potentially add this partially loaded (empty) table to db object if that's desired,
-                // or skip adding it entirely. For now, we'll add it if TDF was 'successful' but resulted in no fields.
-                // db.addTable(table); // Or decide not to add it
-                continue; // Skip to next TDF file
+                continue;
             }
-
 
             // --- Load Record Data (.trd) ---
             QString trdFilePath = db_dir_path.filePath(current_table_name + ".trd");
@@ -689,12 +768,14 @@ void xhydbmanager::load_databases_from_files() {
                     qDebug() << "    [LOAD_DB] TRD file not found (this is normal for a new or empty table):" << trdFilePath;
                 }
             }
-            db.addTable(table); // Add the fully populated (or partially if TRD errors) table to the database object
+             currentDbPtr->addTable(table); // Add the fully populated (or partially if TRD errors) table to the database object
         } // end for TDF files (tables)
-        m_databases.append(db); // Add the database to the manager's list
+     // Add the database to the manager's list
     } // end for DB directories
     qDebug() << "[LOAD_DB] Finished loading all databases and tables.";
 }
+
+
 xhydatabase* xhydbmanager::find_database(const QString& dbname) {
     for (auto& db : m_databases) {
         if (db.name().toLower() == dbname.toLower()) {
@@ -717,102 +798,93 @@ void xhydbmanager::save_table_definition_file(const QString& filePath, const xhy
         return;
     }
     QFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) { // Truncate to overwrite existing file
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         qWarning() << "[SAVE_TDF] Error: Failed to open TDF file for writing: " << filePath;
         return;
     }
 
     QDataStream out(&file);
     out.setVersion(QDataStream::Qt_5_15);
-
     qDebug() << "[SAVE_TDF] Saving TDF for table:" << table->name() << "to" << filePath;
+
+    // 1. 保存字段数量 (可选，但有助于加载时验证)
+    // quint32 numFields = static_cast<quint32>(table->fields().size());
+    // out << numFields;
 
     for (const auto& field : table->fields()) {
         FieldBlock fb;
-        memset(&fb, 0, sizeof(FieldBlock)); // Initialize FieldBlock with zeros
-
-        // fb.order; // 如果您的 xhyfield 有 order 成员并且需要保存，请在这里设置
+        memset(&fb, 0, sizeof(FieldBlock));
+        // ... (原有的填充 FieldBlock fb 的逻辑，如 fb.name, fb.type, fb.param, fb.size, fb.integrities) ...
         qstrncpy(fb.name, field.name().toUtf8().constData(), sizeof(fb.name) - 1);
         fb.type = static_cast<int>(field.type());
 
-        fb.param = 0; // Initialize parameter fields
-        fb.size = 0;
+        // 填充 fb.param 和 fb.size (基于 CHAR/VARCHAR 的 SIZE, DECIMAL 的 PRECISION/SCALE)
+        // 这个逻辑需要从您之前的代码或 xhytable::addfield 的解析逻辑中获取
+        const QStringList& constraints = field.constraints();
+        bool sizeFound = false; // For CHAR/VARCHAR
+        bool precisionFound = false; // For DECIMAL
+        // bool scaleFound = false; // For DECIMAL (fb.size is scale)
 
-        xhyfield::datatype currentType = field.type();
-        const QStringList& constraints = field.constraints(); // Get all constraints for the field
-
-        if (currentType == xhyfield::CHAR || currentType == xhyfield::VARCHAR) {
-            bool sizeFound = false;
+        if (field.type() == xhyfield::CHAR || field.type() == xhyfield::VARCHAR) {
             for (const QString& c : constraints) {
                 if (c.startsWith("SIZE(", Qt::CaseInsensitive) && c.endsWith(")")) {
-                    bool ok;
-                    int len = c.mid(5, c.length() - 6).toInt(&ok);
-                    if (ok && len > 0) {
-                        fb.param = len;
-                        sizeFound = true;
-                    } else {
-                        qWarning() << "[SAVE_TDF] Invalid SIZE parameter for" << field.name() << ":" << c;
-                        // Provide safe defaults if conversion fails or len is invalid
-                        if (currentType == xhyfield::CHAR) fb.param = 1;
-                        else fb.param = 255; // A common default for VARCHAR if not specified properly
-                    }
-                    break; // Assuming only one SIZE constraint
+                    fb.param = c.mid(5, c.length() - 6).toInt(); sizeFound = true; break;
                 }
             }
-            if (!sizeFound) { // If no SIZE constraint was found in xhyfield's list
-                if (currentType == xhyfield::CHAR) {
-                    fb.param = 1; // Default CHAR to SIZE(1) if not specified
-                    qDebug() << "[SAVE_TDF] Field " << field.name() << " (CHAR) missing SIZE constraint, defaulted fb.param to 1.";
-                } else if (currentType == xhyfield::VARCHAR) {
-                    qWarning() << "[SAVE_TDF] Field " << field.name() << " (VARCHAR) missing SIZE constraint. fb.param remains 0 (may load as base VARCHAR or default).";
-                    // fb.param = 255; // Or a common default for VARCHAR
-                }
-            }
-        } else if (currentType == xhyfield::DECIMAL) {
-            bool p_found = false;
-            bool s_found = false; // To track if scale was explicitly set
+            if (!sizeFound && field.type() == xhyfield::CHAR) fb.param = 1; // Default CHAR(1)
+            // VARCHAR 通常需要显式长度，若无则可能是255或错误
+        } else if (field.type() == xhyfield::DECIMAL) {
             for (const QString& c : constraints) {
                 if (c.startsWith("PRECISION(", Qt::CaseInsensitive) && c.endsWith(")")) {
-                    bool ok;
-                    int p = c.mid(10, c.length() - 11).toInt(&ok);
-                    if (ok && p > 0) {
-                        fb.param = p; // Store Precision in fb.param
-                        p_found = true;
-                    } else {
-                        qWarning() << "[SAVE_TDF] Invalid PRECISION for" << field.name() << ":" << c;
-                    }
+                    fb.param = c.mid(10, c.length() - 11).toInt(); precisionFound = true;
                 } else if (c.startsWith("SCALE(", Qt::CaseInsensitive) && c.endsWith(")")) {
-                    bool ok;
-                    int s = c.mid(6, c.length() - 7).toInt(&ok);
-                    if (ok && s >= 0) {
-                        fb.size = s; // Store Scale in fb.size
-                        s_found = true;
-                    } else {
-                        qWarning() << "[SAVE_TDF] Invalid SCALE for" << field.name() << ":" << c;
-                    }
+                    fb.size = c.mid(6, c.length() - 7).toInt(); // scaleFound = true;
                 }
             }
-            if (!p_found) {
-                qWarning() << "[SAVE_TDF] DECIMAL field " << field.name() << " missing PRECISION constraint. fb.param set to 0.";
-            }
-            // fb.size will be 0 if SCALE constraint was missing or invalid, which is a valid default for scale.
+            // DECIMAL 通常需要 PRECISION，SCALE 默认为 0
+            if (!precisionFound) { /* qWarning or default precision */ }
         }
-        // ENUM values (field.enum_values()) are not saved into FieldBlock's param/size.
-        // This would require a different serialization strategy for enum values.
 
         fb.integrities = 0;
-        if (constraints.contains("PRIMARY_KEY", Qt::CaseInsensitive)) fb.integrities |= 0x01;
-        if (constraints.contains("NOT_NULL", Qt::CaseInsensitive)) fb.integrities |= 0x02;
+        if (table->primaryKeys().contains(field.name(), Qt::CaseInsensitive) || constraints.contains("PRIMARY_KEY", Qt::CaseInsensitive)) fb.integrities |= 0x01;
+        if (table->notNullFields().contains(field.name()) || constraints.contains("NOT_NULL", Qt::CaseInsensitive)) fb.integrities |= 0x02;
+        // 对于字段级 UNIQUE (从 xhyfield::constraints() 解析) 或表级 UNIQUE (从 xhytable::m_uniqueConstraints)
+        // FieldBlock 的 integrities 可能不直接反映表级多字段 UNIQUE。
+        // 这里简化为只检查字段本身的约束列表是否有 UNIQUE。
         if (constraints.contains("UNIQUE", Qt::CaseInsensitive)) fb.integrities |= 0x04;
-        // Other constraints like CHECK, FOREIGN KEY are not currently saved via FieldBlock.
 
-        GetSystemTime(&fb.mtime); // Windows specific for modification time
+
+        GetSystemTime(&fb.mtime); // Windows specific
         out.writeRawData(reinterpret_cast<const char*>(&fb), sizeof(FieldBlock));
-        qDebug() << "  [SAVE_TDF] Saved field:" << field.name() << "TypeID:" << fb.type << "Param:" << fb.param << "Size:" << fb.size << "Integrities:" << fb.integrities;
     }
+
+    // 2. 保存外键信息
+    const QList<QMap<QString, QString>>& foreignKeys = table->foreignKeys();
+    quint32 numForeignKeys = static_cast<quint32>(foreignKeys.size());
+    out << numForeignKeys; // 写入外键定义的数量
+
+    qDebug() << "  [SAVE_TDF] Saving" << numForeignKeys << "foreign key definitions for table" << table->name();
+    for (const auto& fkMap : foreignKeys) {
+        out << fkMap.value("constraintName");
+        out << fkMap.value("column");
+        out << fkMap.value("referenceTable");
+        out << fkMap.value("referenceColumn");
+        // 如果要保存 ON DELETE/UPDATE 规则，也在这里写入
+        // out << fkMap.value("onDeleteAction", "RESTRICT"); // 假设有这些键
+        // out << fkMap.value("onUpdateAction", "RESTRICT");
+        qDebug() << "    [SAVE_TDF_FK] Saved FK:" << fkMap.value("constraintName")
+                 << "Col:" << fkMap.value("column")
+                 << "RefTable:" << fkMap.value("referenceTable")
+                 << "RefCol:" << fkMap.value("referenceColumn");
+    }
+
     file.close();
     qDebug() << "[SAVE_TDF] Finished saving TDF for table:" << table->name();
 }
+
+
+
+
 // 2. 保存记录文件
 void xhydbmanager::save_table_records_file(const QString& filePath, const xhytable* table) {
     if (!table) {

@@ -3,7 +3,7 @@
 
 #include <QString>
 #include <QStringList>
-#include"ConditionNode.h"
+#include "ConditionNode.h"
 class xhyfield {
 public:
     enum datatype {

@@ -8,7 +8,7 @@ xhyfield::xhyfield(const QString& name, datatype type, const QStringList& constr
 QString xhyfield::name() const { return m_name; }
 xhyfield::datatype xhyfield::type() const { return m_type; }
 QStringList xhyfield::constraints() const {
-    return m_constraints; // 直接返回 m_constraints
+    return m_constraints;
 }
 
 QString xhyfield::checkConstraint() const {

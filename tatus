@@ -1,0 +1,47 @@
+[33mcommit 03ec1fdcbededbb5aab4071f805cb005f11cc632[m[33m ([m[1;36mHEAD -> [m[1;32mmaster[m[33m)[m
+Author: xhy2539 <1121799294@qq.com>
+Date:   Sat May 10 19:27:30 2025 +0800
+
+    修复了update问题以及一些条件解析问题，修正事务回滚异常
+
+[33mcommit f6094dd0729b0a6dab634021385709fcadc17686[m
+Author: ATlous <1994044457@qq.com>
+Date:   Sat May 10 16:51:56 2025 +0800
+
+    合并
+
+[33mcommit 3c61753f908456b3e18c781773a76b337a0b977d[m
+Author: ATlous <1994044457@qq.com>
+Date:   Mon May 5 14:32:17 2025 +0800
+
+    a simple GUI
+
+[33mcommit ba3caf90e37a3039aca17cab08151491946e2a6f[m
+Author: ATlous <1994044457@qq.com>
+Date:   Wed Apr 30 00:40:23 2025 +0800
+
+    modify
+
+[33mcommit ac6eed7fe7c9a68c316089a10bdcb31b0ce89bbc[m
+Author: ATlous <1994044457@qq.com>
+Date:   Thu Apr 17 15:05:04 2025 +0800
+
+    111
+
+[33mcommit e65a5837160df31bccf8ee58b465a2dcd48806b8[m
+Author: ATlous <1994044457@qq.com>
+Date:   Wed Apr 9 00:15:06 2025 +0800
+
+    test
+
+[33mcommit 601f4966ac48d90274688c0ab06d61954c941cf7[m[33m ([m[1;31mDBMS-Qt/main[m[33m)[m
+Author: xhy2539 <1121799294@qq.com>
+Date:   Tue Apr 8 01:49:21 2025 +0800
+
+    Update README.md
+
+[33mcommit 2715dc9171aaddd002d3103020cfbdacaba4b27e[m
+Author: xhy2539 <1121799294@qq.com>
+Date:   Tue Apr 8 01:15:40 2025 +0800
+
+    Initial commit

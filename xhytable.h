@@ -4,76 +4,93 @@
 #include "xhyfield.h"
 #include "xhyrecord.h"
 #include "ConditionNode.h"
+#include <QString>
 #include <QList>
 #include <QMap>
-#include <QRegularExpression>
-#include <stdexcept>
-#include <QVector>
+#include <QSet>
 #include <QVariant>
-#include <QDateTime>
+
+// 前向声明，避免循环依赖
+class xhydatabase;
 
 class xhytable {
 public:
-    explicit xhytable(const QString& name = "");
-    const QList<QString>& primaryKeys() const { return m_primaryKeys; }
-    const QList<xhyfield>& fields() const { return m_fields; }
-    const QList<xhyrecord>& records() const;
-    const QList<xhyrecord>& getCommittedRecords() const { return m_records; } // 用于 createtable
+    // 构造函数：增加父数据库指针参数
+    xhytable(const QString& name, xhydatabase* parentDb = nullptr);
+
     const QString& name() const { return m_name; }
+    const QList<xhyfield>& fields() const { return m_fields; }
+    const QList<xhyrecord>& records() const; // 根据是否在事务中返回 m_tempRecords 或 m_records
+    const QList<xhyrecord>& getCommittedRecords() const { return m_records; }
 
     void addfield(const xhyfield& field);
-    void addrecord(const xhyrecord& record);
-    bool createtable(const xhytable& table);
-    void add_primary_key(const QStringList& keys);
-    void add_foreign_key(const QString& field, const QString& referencedTable, const QString& referencedField, const QString& constraintName);
-    void add_unique_constraint(const QStringList& fields, const QString& constraintName);
-    void add_check_constraint(const QString& condition, const QString& constraintName);
     bool has_field(const QString& field_name) const;
-    void add_field(const xhyfield& field);
+    xhyfield::datatype getFieldType(const QString& fieldName) const;
+    const xhyfield* get_field(const QString& field_name) const;
+    const QStringList& primaryKeys() const { return m_primaryKeys; }
+    const QList<QMap<QString, QString>>& foreignKeys() const { return m_foreignKeys; } // 获取外键定义列表
+    const QMap<QString, QList<QString>>& uniqueConstraints() const { return m_uniqueConstraints; }
+    const QSet<QString>& notNullFields() const { return m_notNullFields; }
+    const QMap<QString, QString>& defaultValues() const { return m_defaultValues; }
+    const QMap<QString, QString>& checkConstraints() const { return m_checkConstraints; }
+
+
+    void add_field(const xhyfield& field); // 等同于 addfield
     void remove_field(const QString& field_name);
     void rename(const QString& new_name);
-    const xhyfield* get_field(const QString &field_name) const;
+    void addrecord(const xhyrecord& record); // 内部使用，已验证记录
+    bool createtable(const xhytable& table); // 从另一个表结构和数据创建（元数据复制）
 
-    bool insertData(const QMap<QString, QString>& fieldValues);
-    int updateData(const QMap<QString, QString> &updates, const ConditionNode &conditions);
-    int deleteData(const ConditionNode &conditions);
-    bool selectData(const ConditionNode &conditions, QVector<xhyrecord>& results) const;
+    void add_primary_key(const QStringList& keys);
+    void add_foreign_key(const QString& field, const QString& referencedTable, const QString& referencedField, const QString& constraintName = "");
+    void add_unique_constraint(const QStringList& fields, const QString& constraintName = "");
+    void add_check_constraint(const QString& condition, const QString& constraintName = "");
 
     void beginTransaction();
     void commit();
     void rollback();
     bool isInTransaction() const { return m_inTransaction; }
 
-    xhyfield::datatype getFieldType(const QString &fieldName) const;
-    bool matchConditions(const xhyrecord &record, const ConditionNode &condition) const;
+    // 数据操作 (CRUD)
+    bool insertData(const QMap<QString, QString>& fieldValues);
+    int updateData(const QMap<QString, QString>& updates_with_expressions, const ConditionNode& conditions);
+    int deleteData(const ConditionNode& conditions);
+    bool selectData(const ConditionNode& conditions, QVector<xhyrecord>& results) const;
 
-    //约束检查
-    bool checkInsertConstraints(const QMap<QString, QString>& fieldValues) const;
-    bool checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const;
-    bool checkDeleteConstraints(const ConditionNode & conditions) const;
-private:
+    // 验证方法
     void validateRecord(const QMap<QString, QString>& values, const xhyrecord* original_record_for_update = nullptr) const;
     bool validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const;
-    bool checkConstraint(const xhyfield& field, const QString& value) const;
-    void rebuildIndexes();
+    bool checkConstraint(const xhyfield& field, const QString& value) const; // CHECK 约束 (目前是占位符)
+
+    void rebuildIndexes(); // (占位符)
 
     QVariant convertToTypedValue(const QString& strValue, xhyfield::datatype type) const;
     bool compareQVariants(const QVariant& left, const QVariant& right, const QString& op) const;
+    bool matchConditions(const xhyrecord& record, const ConditionNode& condition) const;
+
+    // 新增：设置父数据库的方法
+    void setParentDb(xhydatabase* db) { m_parentDb = db; }
+
+    bool checkInsertConstraints(const QMap<QString, QString> &fieldValues) const;
+    bool checkUpdateConstraints(const QMap<QString, QString> &updates, const ConditionNode &conditions) const;
+private:
+    // 新增：检查删除父记录时的外键限制 (RESTRICT)
+    bool checkForeignKeyDeleteRestrictions(const xhyrecord& recordToDelete) const;
 
     QString m_name;
     QList<xhyfield> m_fields;
-    QList<xhyrecord> m_records;
-    QList<xhyrecord> m_tempRecords;
-    bool m_inTransaction; // 已声明
+    QList<xhyrecord> m_records; // 已提交状态
+    QStringList m_primaryKeys;
+    QList<QMap<QString, QString>> m_foreignKeys; // FK 定义
+    QMap<QString, QList<QString>> m_uniqueConstraints; // <ConstraintName, ListOfFields>
+    QSet<QString> m_notNullFields;
+    QMap<QString, QString> m_defaultValues; // <FieldName, DefaultValue>
+    QMap<QString, QString> m_checkConstraints;
 
+    bool m_inTransaction;
+    QList<xhyrecord> m_tempRecords; // 事务期间的临时记录
 
-    //约束存储
-    QList<QString> m_primaryKeys;  // 主键字段列表
-    QList<QMap<QString, QString>> m_foreignKeys;  // 外键信息列表
-    QMap<QString, QList<QString>> m_uniqueConstraints; // 唯一约束映射
-    QMap<QString, QString> m_checkConstraints; // 检查约束映射
-    QSet<QString> m_notNullFields; // 非空字段集合
-    QMap<QString, QString> m_defaultValues; // 默认值映射
+    xhydatabase* m_parentDb; // 指向所属数据库的指针
 };
 
 #endif // XHYTABLE_H

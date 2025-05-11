@@ -1937,36 +1937,237 @@ void MainWindow::show_tables(const QString& db_name_input) {
     textBuffer.append(output.trimmed());
 }
 
+
+
+namespace { // 使用匿名命名空间，使这两个函数仅在本文件可见
+
+
+int visualLength(const QString& str) {
+    int length = 0;
+    for (QChar qc : str) {
+        char16_t c = qc.unicode();
+        // 这个范围是一个简化的判断，主要覆盖中日韩统一表意文字等常见的东亚宽字符。
+        // 更精确的判断可能需要更复杂的Unicode属性库。
+        if ((c >= 0x2E80 && c <= 0x9FFF) || // CJK Radicals Supplement, CJK Unified Ideographs, etc.
+            (c >= 0xAC00 && c <= 0xD7A3) || // Hangul Syllables
+            (c >= 0xF900 && c <= 0xFAFF) || // CJK Compatibility Ideographs
+            (c >= 0xFF00 && c <= 0xFFEF)    // Fullwidth Forms
+            ) {
+            length += 2;
+        } else {
+            length += 1;
+        }
+    }
+    return length;
+}
+
+// 将字符串左对齐填充到指定的视觉宽度
+QString padToVisualWidth(const QString& str, int targetVisualWidth) {
+    QString paddedStr = str;
+    int currentVisualLen = visualLength(str);
+    if (currentVisualLen < targetVisualWidth) {
+        paddedStr += QString(targetVisualWidth - currentVisualLen, ' ');
+    }
+    // 如果需要，可以添加截断逻辑：
+    else if (currentVisualLen > targetVisualWidth) {
+        // 简单的截断 (可能不理想，因为它不考虑字符边界)
+         paddedStr = str.left(targetVisualWidth - 3) + "...";
+    }
+    return paddedStr;
+}
+
+}
 void MainWindow::show_schema(const QString& db_name_input, const QString& table_name_input) {
     QString db_name = db_name_input.trimmed();
     QString table_name = table_name_input.trimmed();
 
-    if (db_name.isEmpty()) { textBuffer.append("错误: 未指定数据库名。"); return; }
-    if (table_name.isEmpty()) { textBuffer.append("错误: 未指定表名。"); return; }
+    if (db_name.isEmpty()) {
+        textBuffer.append("错误: 未指定数据库名。");
+        return;
+    }
+    if (table_name.isEmpty()) {
+        textBuffer.append("错误: 未指定表名。");
+        return;
+    }
 
     xhydatabase* db = db_manager.find_database(db_name);
     if (!db) {
         textBuffer.append(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
-    xhytable* table = db->find_table(table_name);
+    const xhytable* table = db->find_table(table_name);
     if (!table) {
         textBuffer.append(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
         return;
     }
-    QString output = QString("表 '%1.%2' 的结构:\n").arg(db_name, table_name);
-    output += QString("%1\t%2\t%3\n").arg("列名", -20).arg("类型", -20).arg("约束");
-    output += QString(60, '-') + "\n";
-    for (const auto& field : table->fields()) {
-        output += QString("%1\t%2\t%3\n")
-        .arg(field.name(), -20)
-            .arg(field.typestring(), -20)
-            .arg(field.constraints().join(" "));
+
+    QStringList outputLines;
+    outputLines.append(QString("表 '%1.%2' 的结构 (TABLE SCHEMA):").arg(db_name, table_name));
+    outputLines.append("");
+    outputLines.append("列信息 (COLUMNS):");
+
+    // 准备列头和数据行
+    QStringList columnHeaders = {"字段名", "类型与列约束 ", "NULL?", "键 ", "默认值 "};
+    QList<QStringList> columnDataRows;
+
+    const QStringList& pkColumns = table->primaryKeys();
+    const QSet<QString>& notNullColumns = table->notNullFields();
+    const QMap<QString, QString>& defaultValuesMap = table->defaultValues();
+
+    for (const xhyfield& field : table->fields()) {
+        QStringList currentRow;
+        QString fieldName = field.name();
+        QString typeString = field.typestring();
+        QString nullable = notNullColumns.contains(fieldName) ? "NO" : "YES";
+        QString keyInfo;
+        if (pkColumns.contains(fieldName, Qt::CaseInsensitive)) {
+            keyInfo = "PRI";
+        }
+        if (field.constraints().contains("UNIQUE", Qt::CaseInsensitive)) {
+            if (!keyInfo.isEmpty()) keyInfo += "/";
+            keyInfo += "UNI";
+        }
+        QString defaultValueDisplay = "NULL";
+        if (defaultValuesMap.contains(fieldName)) {
+            QString actualDefault = defaultValuesMap.value(fieldName);
+            if (actualDefault.isNull()) {
+                defaultValueDisplay = "NULL";
+            } else if (actualDefault.isEmpty()) {
+                defaultValueDisplay = "''";
+            } else {
+                defaultValueDisplay = actualDefault;
+            }
+        }
+        currentRow << fieldName << typeString << nullable << keyInfo << defaultValueDisplay;
+        columnDataRows.append(currentRow);
     }
-    if (!table->primaryKeys().isEmpty()) {
-        output += "\nPRIMARY KEY: (" + table->primaryKeys().join(", ") + ")\n";
+
+    // 计算每列的最大视觉宽度
+    QList<int> maxWidths;
+    if (!columnHeaders.isEmpty()) { // 确保有列头
+        for (int i = 0; i < columnHeaders.size(); ++i) {
+            int maxLen = visualLength(columnHeaders.at(i));
+            for (const QStringList& row : columnDataRows) {
+                if (i < row.size()) {
+                    maxLen = qMax(maxLen, visualLength(row.at(i)));
+                }
+            }
+            maxWidths.append(maxLen);
+        }
     }
-    textBuffer.append(output.trimmed());
+
+
+    // 格式化并添加列头到输出
+    if (!columnHeaders.isEmpty() && columnHeaders.size() == maxWidths.size()) {
+        QString headerLine;
+        for (int i = 0; i < columnHeaders.size(); ++i) {
+            headerLine += padToVisualWidth(columnHeaders.at(i), maxWidths.at(i));
+            if (i < columnHeaders.size() - 1) {
+                headerLine += " | ";
+            }
+        }
+        outputLines.append(headerLine);
+
+        // 格式化并添加分隔线
+        QString separatorLine;
+        int totalSeparatorLength = 0;
+        for (int i = 0; i < maxWidths.size(); ++i) {
+            separatorLine += QString("-").repeated(maxWidths.at(i));
+            totalSeparatorLength += maxWidths.at(i);
+            if (i < maxWidths.size() - 1) {
+                separatorLine += "---"; // 对于 " | " 分隔符
+                totalSeparatorLength += 3;
+            }
+        }
+        outputLines.append(separatorLine);
+    }
+
+
+    // 格式化并添加数据行到输出
+    if (!columnDataRows.isEmpty() && !maxWidths.isEmpty() && columnDataRows.first().size() == maxWidths.size()) {
+        for (const QStringList& row : columnDataRows) {
+            QString dataLine;
+            for (int i = 0; i < row.size(); ++i) {
+                dataLine += padToVisualWidth(row.at(i), maxWidths.at(i));
+                if (i < row.size() - 1) {
+                    dataLine += " | ";
+                }
+            }
+            outputLines.append(dataLine);
+        }
+    }
+
+
+    // 表级约束（这部分通常不需要严格的列对齐，保持原有列表形式即可）
+    outputLines.append("");
+    outputLines.append("表级约束 (TABLE CONSTRAINTS):");
+
+    if (!pkColumns.isEmpty()) {
+        outputLines.append(QString("  PRIMARY KEY (%1)").arg(pkColumns.join(", ")));
+    } else {
+        outputLines.append("  PRIMARY KEY: 无 (None)");
+    }
+
+    const QMap<QString, QList<QString>>& uniqueConstraints = table->uniqueConstraints();
+    if (!uniqueConstraints.isEmpty()) {
+        outputLines.append("  唯一约束 (UNIQUE CONSTRAINTS):");
+        for (auto it = uniqueConstraints.constBegin(); it != uniqueConstraints.constEnd(); ++it) {
+            outputLines.append(QString("    CONSTRAINT %1 UNIQUE (%2)")
+                                   .arg(it.key())
+                                   .arg(it.value().join(", ")));
+        }
+    } else {
+        outputLines.append("  唯一约束 (UNIQUE CONSTRAINTS): 无 (None)");
+    }
+
+    const QMap<QString, QString>& checkConstraints = table->checkConstraints();
+    if (!checkConstraints.isEmpty()) {
+        outputLines.append("  检查约束 (CHECK CONSTRAINTS):");
+        for (auto it = checkConstraints.constBegin(); it != checkConstraints.constEnd(); ++it) {
+            outputLines.append(QString("    CONSTRAINT %1 CHECK (%2)")
+                                   .arg(it.key())
+                                   .arg(it.value()));
+        }
+    } else {
+        outputLines.append("  检查约束 (CHECK CONSTRAINTS): 无 (None)");
+    }
+
+    const QList<ForeignKeyDefinition>& foreignKeys = table->foreignKeys();
+    if (!foreignKeys.isEmpty()) {
+        outputLines.append("  外键约束 (FOREIGN KEYS):");
+        for (const ForeignKeyDefinition& fkDef : foreignKeys) {
+            QStringList childCols, parentCols;
+            for(auto mapIt = fkDef.columnMappings.constBegin(); mapIt != fkDef.columnMappings.constEnd(); ++mapIt) {
+                childCols.append(mapIt.key());
+                parentCols.append(mapIt.value());
+            }
+            outputLines.append(QString("    CONSTRAINT %1 FOREIGN KEY (%2) REFERENCES %3 (%4)")
+                                   .arg(fkDef.constraintName)
+                                   .arg(childCols.join(", "))
+                                   .arg(fkDef.referenceTable)
+                                   .arg(parentCols.join(", ")));
+        }
+    } else {
+        outputLines.append("  外键约束 (FOREIGN KEYS): 无 (None)");
+    }
+
+    // 计算一个合适的总宽度来画结尾分隔线，或者使用一个固定较长的长度
+    int finalSeparatorLen = 80; // 默认长度
+    if (!maxWidths.isEmpty()) {
+        finalSeparatorLen = 0;
+        for(int w : maxWidths) finalSeparatorLen += w;
+        finalSeparatorLen += (maxWidths.size() -1) * 3; // 加上分隔符 " | " 的宽度
+        finalSeparatorLen = qMax(finalSeparatorLen, 60); // 保证最小长度
+    }
+    outputLines.append(QString("-").repeated(finalSeparatorLen));
+
+
+    // 将构建好的所有行添加到 textBuffer
+    textBuffer.clear(); // 清空之前的DESCRIBE输出（如果textBuffer仅用于单次命令输出）
+    for(const QString& line : outputLines) {
+        textBuffer.append(line);
+    }
+    textBuffer.append("");
 }
 // ENDE von mainwindow.cpp
 ///////////////////////////////////////////////////

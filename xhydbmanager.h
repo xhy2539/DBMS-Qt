@@ -46,6 +46,7 @@ public:
         int size;       // 应该用于存储 DECIMAL 的小数位数 S (或者其他需要第二个参数的类型)
         SYSTEMTIME mtime;
         int integrities; // 存储 PRIMARY_KEY, NOT_NULL, UNIQUE 的位标记
+         char enum_values_str[1024];
     };
 
     struct IndexBlock {

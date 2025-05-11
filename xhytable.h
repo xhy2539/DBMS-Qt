@@ -12,8 +12,25 @@
 
 // 前向声明，避免循环依赖
 class xhydatabase;
+struct ForeignKeyDefinition {
+    QString constraintName;          // 约束名称
+    QString referenceTable;          // 引用（父）表的名称
+    // QMap 来存储子表列名 -> 父表列名 的映射
+    QMap<QString, QString> columnMappings;
+    // 可选：ON DELETE 和 ON UPDATE 规则，例如 "RESTRICT", "CASCADE", "SET NULL"
+    // QString onDeleteAction;
+    // QString onUpdateAction;
 
+    // 默认构造函数
+    ForeignKeyDefinition() = default;
+
+    // 比较操作符，方便在 QList 中查找或移除
+    bool operator==(const ForeignKeyDefinition& other) const {
+        return constraintName.compare(other.constraintName, Qt::CaseInsensitive) == 0;
+    }
+};
 class xhytable {
+
 public:
     // 构造函数：增加父数据库指针参数
     xhytable(const QString& name, xhydatabase* parentDb = nullptr);
@@ -28,7 +45,8 @@ public:
     xhyfield::datatype getFieldType(const QString& fieldName) const;
     const xhyfield* get_field(const QString& field_name) const;
     const QStringList& primaryKeys() const { return m_primaryKeys; }
-    const QList<QMap<QString, QString>>& foreignKeys() const { return m_foreignKeys; } // 获取外键定义列表
+    // 同时，修改 xhytable::foreignKeys() 的返回类型
+    const QList<ForeignKeyDefinition>& foreignKeys() const { return m_foreignKeys; } // 获取外键定义列表
     const QMap<QString, QList<QString>>& uniqueConstraints() const { return m_uniqueConstraints; }
     const QSet<QString>& notNullFields() const { return m_notNullFields; }
     const QMap<QString, QString>& defaultValues() const { return m_defaultValues; }
@@ -42,7 +60,10 @@ public:
     bool createtable(const xhytable& table); // 从另一个表结构和数据创建（元数据复制）
 
     void add_primary_key(const QStringList& keys);
-    void add_foreign_key(const QString& field, const QString& referencedTable, const QString& referencedField, const QString& constraintName = "");
+    void add_foreign_key(const QStringList& childColumns,
+                                   const QString& referencedTable,
+                                   const QStringList& referencedColumns,
+                                   const QString& constraintNameIn);
     void add_unique_constraint(const QStringList& fields, const QString& constraintName = "");
     void add_check_constraint(const QString& condition, const QString& constraintName = "");
 
@@ -81,7 +102,7 @@ private:
     QList<xhyfield> m_fields;
     QList<xhyrecord> m_records; // 已提交状态
     QStringList m_primaryKeys;
-    QList<QMap<QString, QString>> m_foreignKeys; // FK 定义
+    QList<ForeignKeyDefinition> m_foreignKeys;  // FK 定义
     QMap<QString, QList<QString>> m_uniqueConstraints; // <ConstraintName, ListOfFields>
     QSet<QString> m_notNullFields;
     QMap<QString, QString> m_defaultValues; // <FieldName, DefaultValue>

@@ -616,35 +616,46 @@ void xhydbmanager::load_databases_from_files() {
                     table.addfield(xhyfield(field_name_str, type, constraints));
                 } // End while TDF fields
 
+
                 // 读取外键信息
-                if (tdf_load_successful && !tdfFile.atEnd()) { // 如果字段加载成功且文件未结束
-                    quint32 numForeignKeys = 0; // 初始化
+                if (tdf_load_successful && !tdfFile.atEnd()) {
+                    quint32 numForeignKeys = 0;
                     if (tdfFile.pos() + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
                         tdf_in_stream >> numForeignKeys;
                     } else if (!tdfFile.atEnd()){
                         qWarning() << "    [LOAD_DB_TDF] Not enough data left to read foreign key count for " << current_table_name;
-                        // tdf_load_successful = false; // 可选：标记为失败
                     }
-
 
                     if (tdf_in_stream.status() == QDataStream::Ok && numForeignKeys > 0) {
                         qDebug() << "    [LOAD_DB_TDF] Expecting" << numForeignKeys << "foreign key definitions for table" << current_table_name;
                         for (quint32 i = 0; i < numForeignKeys; ++i) {
-                            QString constraintName, fk_column, refTable, refColumn;
-                            // QString onDelete, onUpdate; // 如果保存了规则
-                            tdf_in_stream >> constraintName >> fk_column >> refTable >> refColumn;
-                            // tdf_in_stream >> onDelete >> onUpdate;
+                            QString constraintName, refTable;
+                            quint32 numMappings = 0; // 新增：读取列映射的数量
+                            tdf_in_stream >> constraintName >> refTable >> numMappings;
 
-                            if (tdf_in_stream.status() == QDataStream::Ok) {
-                                table.add_foreign_key(fk_column, refTable, refColumn, constraintName);
-                                // table.setForeignKeyActions(constraintName, onDelete, onUpdate); // 如果支持
-                                qDebug() << "      [LOAD_DB_TDF_FK] Loaded FK:" << constraintName;
-                            } else {
-                                qWarning() << "    [LOAD_DB_TDF] Error reading foreign key definition " << (i + 1) << " for " << current_table_name;
+                            if (tdf_in_stream.status() != QDataStream::Ok) {
+                                qWarning() << "    [LOAD_DB_TDF] Error reading FK header for " << current_table_name;
                                 tdf_load_successful = false; break;
                             }
+
+                            QStringList childColumns;
+                            QStringList referencedColumns;
+                            for (quint32 j = 0; j < numMappings; ++j) {
+                                QString childCol, refCol;
+                                tdf_in_stream >> childCol >> refCol;
+                                if (tdf_in_stream.status() != QDataStream::Ok) {
+                                    qWarning() << "    [LOAD_DB_TDF] Error reading FK mapping " << (j + 1) << " for " << current_table_name;
+                                    tdf_load_successful = false; break;
+                                }
+                                childColumns.append(childCol);
+                                referencedColumns.append(refCol);
+                            }
+                            if (!tdf_load_successful) break; // 如果内层循环出错，跳出外层循环
+
+                            table.add_foreign_key(childColumns, refTable, referencedColumns, constraintName); // <-- 调用新的 add_foreign_key
+                            qDebug() << "      [LOAD_DB_TDF_FK] Loaded FK:" << constraintName;
                         }
-                    } else if (tdf_in_stream.status() != QDataStream::Ok && numForeignKeys > 0) { // 流错误但期望有FK
+                    } else if (tdf_in_stream.status() != QDataStream::Ok && numForeignKeys > 0) {
                         qWarning() << "    [LOAD_DB_TDF] Stream error while trying to read foreign key count for " << current_table_name;
                         tdf_load_successful = false;
                     } else if (numForeignKeys == 0) {
@@ -859,29 +870,28 @@ void xhydbmanager::save_table_definition_file(const QString& filePath, const xhy
     }
 
     // 2. 保存外键信息
-    const QList<QMap<QString, QString>>& foreignKeys = table->foreignKeys();
+    const QList<ForeignKeyDefinition>& foreignKeys = table->foreignKeys(); // <-- 现在返回的是 ForeignKeyDefinition
     quint32 numForeignKeys = static_cast<quint32>(foreignKeys.size());
     out << numForeignKeys; // 写入外键定义的数量
 
     qDebug() << "  [SAVE_TDF] Saving" << numForeignKeys << "foreign key definitions for table" << table->name();
-    for (const auto& fkMap : foreignKeys) {
-        out << fkMap.value("constraintName");
-        out << fkMap.value("column");
-        out << fkMap.value("referenceTable");
-        out << fkMap.value("referenceColumn");
-        // 如果要保存 ON DELETE/UPDATE 规则，也在这里写入
-        // out << fkMap.value("onDeleteAction", "RESTRICT"); // 假设有这些键
-        // out << fkMap.value("onUpdateAction", "RESTRICT");
-        qDebug() << "    [SAVE_TDF_FK] Saved FK:" << fkMap.value("constraintName")
-                 << "Col:" << fkMap.value("column")
-                 << "RefTable:" << fkMap.value("referenceTable")
-                 << "RefCol:" << fkMap.value("referenceColumn");
+    for (const auto& fkDef : foreignKeys) { // 遍历 ForeignKeyDefinition 对象
+        out << fkDef.constraintName;
+        out << fkDef.referenceTable;
+        // 保存列映射的数量，然后逐个保存键值对
+        quint32 numMappings = static_cast<quint32>(fkDef.columnMappings.size());
+        out << numMappings;
+        for (auto it = fkDef.columnMappings.constBegin(); it != fkDef.columnMappings.constEnd(); ++it) {
+            out << it.key();   // 子表列名
+            out << it.value(); // 父表列名
+        }
+        qDebug() << "    [SAVE_TDF_FK] Saved FK:" << fkDef.constraintName
+                 << " RefTable:" << fkDef.referenceTable
+                 << " Mappings:" << fkDef.columnMappings;
     }
-
     file.close();
     qDebug() << "[SAVE_TDF] Finished saving TDF for table:" << table->name();
 }
-
 
 
 

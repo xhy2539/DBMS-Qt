@@ -1,11 +1,28 @@
 #include "tableshow.h"
 #include "ui_tableshow.h"
+#include "CustomDelegate.h"
 
-tableShow::tableShow(QWidget *parent)
+tableShow::tableShow(QWidget *parent, QString dbName )
     : QWidget(parent)
     , ui(new Ui::tableShow)
+    , dbName(dbName)
+    , m_table(NULL)
 {
+
     ui->setupUi(this);
+    ui->comfirm->setEnabled(false);
+    ui->cancle->setEnabled(false);
+    CustomDelegate *delegate = new CustomDelegate(ui->tableWidget);
+    ui->tableWidget->setItemDelegate(delegate); // 设置委托
+
+    // 连接自定义信号到槽函数
+    connect(delegate, &CustomDelegate::dataChanged,[=](int row, int col, const QString &oldVal, const QString &newVal) {
+        if(row < m_table.records().count()){
+            // qDebug() << "行:" << row << "列:" << col << "旧值:" << oldVal << "新值:" << newVal <<m_table.records().count();
+
+        }
+    });
+
 }
 
 tableShow::~tableShow()
@@ -14,6 +31,7 @@ tableShow::~tableShow()
 }
 
 void tableShow::setTable(xhytable table){
+    m_table = table;
     ui->tableWidget->setColumnCount(table.fields().count());
     ui->tableWidget->setRowCount(table.records().count());
 
@@ -41,10 +59,46 @@ void tableShow::setTable(xhytable table){
         }
         row++;
     }
+    // for(QString primaryKey : table.primaryKeys()){
+    //     qDebug()<<primaryKey;
+    // }
 }
 
 void tableShow::on_tableWidget_itemChanged(QTableWidgetItem *item)
 {
-    qDebug()<<item->column();
+    // qDebug()<<item->column();
+}
+
+
+void tableShow::on_addRecord_released()
+{
+    ui->tableWidget->insertRow(ui->tableWidget->rowCount());
+    ui->addRecord->setEnabled(false);
+    ui->deleteRecord->setEnabled(false);
+    ui->comfirm->setEnabled(true);
+    ui->cancle->setEnabled(true);
+}
+
+
+void tableShow::on_deleteRecord_released()
+{
+
+}
+
+
+void tableShow::on_comfirm_released()
+{
+
+}
+
+
+void tableShow::on_cancle_released()
+{
+    ui->tableWidget->removeRow(ui->tableWidget->rowCount()-1);
+
+    ui->addRecord->setEnabled(true);
+    ui->deleteRecord->setEnabled(true);
+    ui->comfirm->setEnabled(false);
+    ui->cancle->setEnabled(false);
 }
 

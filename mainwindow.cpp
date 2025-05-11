@@ -2224,15 +2224,16 @@ void MainWindow::openTable(QString tableName){
             return;
         }
     }
-    tableShow *tableshow = new tableShow;
-    ui->tabWidget->addTab(tableshow,tableName+" @"+current_GUI_Db);
-    ui->tabWidget->setCurrentWidget(tableshow);
+
 
     for(xhydatabase database : db_manager.databases()){
         if(database.name() == current_GUI_Db){
             for(xhytable table : database.tables()){
                 if(table.name() == tableName){
 
+                    tableShow *tableshow = new tableShow(nullptr,current_GUI_Db);
+                    ui->tabWidget->addTab(tableshow,tableName+" @"+current_GUI_Db);
+                    ui->tabWidget->setCurrentWidget(tableshow);
                     tableshow->setTable(table);
                     return ;
                 }

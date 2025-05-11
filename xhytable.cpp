@@ -45,12 +45,153 @@ void xhytable::addfield(const xhyfield& field) {
     xhyfield newField = field;
     // 确保 setOrder 是 xhyfield 的 public 方法或在构造时设置
     // newField.setOrder(m_fields.size() + 1);
-    if(field.constraints().contains("PRIMARY_KEY", Qt::CaseInsensitive)) {
+    if(field.constraints().contains("PRIMARY_KEY", Qt::CaseInsensitive)||field.constraints().contains("PRIMARY")) {
         if (!m_primaryKeys.contains(field.name(), Qt::CaseInsensitive)) {
             m_primaryKeys.append(field.name());
         }
     }
+    //解析非空约束
+    if(field.constraints().contains("NOT_NULL")||field.constraints().contains("null")) {
+        m_notNullFields.insert(field.name());
+    }
+    //解析unique
+    if(field.constraints().contains("UNIQUE")||field.constraints().contains("unique")) {
+        //如果已有，不做操作
+        if(m_uniqueConstraints.contains(field.name()));
+        else {
+            //否则加入
+            QList<QString> temp;
+            temp.append(field.name());
+            m_uniqueConstraints[field.name()]=temp;
+        }
+    }
+    //解析default
+    if(field.constraints().contains("DEFAULT")||field.constraints().contains("default")) {
+        bool defa=false;
+        for (const QString &str : field.constraints()) {
+            if(defa){
+                m_defaultValues[field.name()] = str;
+            }
+            if(str=="DEFAULT"||str=="default") defa=true;
+        }
+    }
     m_fields.append(newField);
+}
+bool xhytable::checkInsertConstraints(const QMap<QString, QString>& fieldValues) const {
+    // 验证主键唯一性
+    if (!m_primaryKeys.isEmpty()) {
+        for (const auto& record : m_records) {
+            bool conflict = true;
+            for (const auto& pk : m_primaryKeys) {
+                if (record.value(pk) != fieldValues.value(pk)) {
+                    conflict = false;
+                    break;
+                }
+            }
+            //如果都一样
+            if (conflict) {
+                qWarning() << "插入失败: 主键冲突";
+                return false; // 主键冲突
+            }
+        }
+    }
+
+    // 验证 NOT NULL 约束
+    for (const QString& field : m_notNullFields) {
+        if (!fieldValues.contains(field)) {
+            qWarning() << "插入失败: 缺少必填字段" << field;
+            return false; // 缺少必填字段
+        }
+    }
+
+    // 验证唯一性约束
+    for (const auto& uniqueConstraint : m_uniqueConstraints) {
+        const QList<QString>& uniqueFields = uniqueConstraint;
+        QMap<QString, QString> values;
+
+        for (const QString& field : uniqueFields) {
+            values[field] = fieldValues.value(field);
+        }
+
+        for (const auto& record : m_records) {
+            bool conflict = true;
+            for (const QString& field : uniqueFields) {
+                if (record.value(field) != values[field]) {
+                    conflict = false;
+                    break;
+                }
+            }
+            if (conflict) {
+                qWarning() << "插入失败: 唯一性约束违反，字段" << uniqueFields.join(", ");
+                return false; // 唯一性冲突
+            }
+        }
+    }
+
+    return true; // 所有约束通过
+}
+// 检查更新操作时是否违反约束
+bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const {
+    for (auto &record : m_records) {
+        if(matchConditions(record, conditions)) {
+
+            // 验证唯一性约束
+            for (const auto& uniqueConstraint : m_uniqueConstraints.keys()) {
+                const QList<QString>& uniqueFields = m_uniqueConstraints[uniqueConstraint];
+
+                QMap<QString, QString> updatedValues;
+
+                for (const QString& field : uniqueFields) {
+                    updatedValues[field] = updates.value(field, record.value(field));
+                }
+
+                bool uniqueConflict = false;
+
+                for (const auto& existingRecord : m_records) {
+                    bool conflict = true;
+
+                    for (const QString& field : uniqueFields) {
+                        if(existingRecord != record && existingRecord.value(field) == updatedValues[field]) {
+                            conflict = false;
+                            break;
+                        }
+                    }
+
+                    if(conflict){
+                        uniqueConflict = true;
+                        break;
+                    }
+                }
+
+                if(uniqueConflict){
+                    qWarning() << "更新失败: 唯一性约束违反，字段" << uniqueFields.join(", ");
+                    return false; // 唯一性冲突
+                }
+            }
+
+            // 验证 NOT NULL 约束
+            for (const QString& field : m_notNullFields) {
+                if(updates.contains(field)) {
+                    if(updates[field].isEmpty()) {
+                        qWarning() << "更新失败: 字段" << field << "不能为空";
+                        return false; // 非空限制违规
+                    }
+                } else {
+                    if(record.value(field).isEmpty()) {
+                        qWarning() << "更新失败: 字段" << field << "不能为空";
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true; // 所有约束通过
+}
+
+// 检查删除操作时是否违反外键约束
+bool xhytable::checkDeleteConstraints(const ConditionNode & conditions) const{
+    return true;
 }
 
 bool xhytable::has_field(const QString& field_name) const {
@@ -183,9 +324,18 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValues) {
         xhyrecord new_record;
         for(const xhyfield& field : m_fields) {
             QString value = fieldValues.value(field.name());
-            if (value.compare("NULL", Qt::CaseInsensitive) == 0 && !field.constraints().contains("NOT_NULL", Qt::CaseInsensitive)) {
+            //如果为空且有默认值
+            if((value==""||value.compare("NULL", Qt::CaseInsensitive) == 0)&&m_defaultValues.find(field.name())!=m_defaultValues.end()){
+
+                    value=m_defaultValues[field.name()];//设置默认值
+                    new_record.insert(field.name(), value);//插入
+            }
+            //为空没有默认值
+            else if (value.compare("NULL", Qt::CaseInsensitive) == 0 && !field.constraints().contains("NOT_NULL", Qt::CaseInsensitive)) {
                 new_record.insert(field.name(), QString());
-            } else {
+            }
+            //不为空
+            else {
                 new_record.insert(field.name(), value);
             }
         }
@@ -384,6 +534,29 @@ bool xhytable::selectData(const ConditionNode & conditions, QVector<xhyrecord>& 
 void xhytable::validateRecord(const QMap<QString, QString>& values, const xhyrecord* original_record_for_update) const {
     qDebug() << "[validateRecord] Validating values:" << values << (original_record_for_update ? "(UPDATE operation)" : "(INSERT operation)");
 
+    // 验证unique约束
+    for (const auto& uniqueConstraint : m_uniqueConstraints) {
+        const QList<QString>& uniqueFields = uniqueConstraint;
+        QMap<QString, QString> values1;
+
+        for (const QString& field : uniqueFields) {
+            values1[field] = values.value(field);
+        }
+
+        for (const auto& record : m_records) {
+            bool conflict = true;
+            for (const QString& field : uniqueFields) {
+                if (record.value(field) != values1[field]) {
+                    conflict = false;
+                    break;
+                }
+            }
+            if (conflict) {
+                qWarning() << "插入失败: 唯一性约束违反，字段" << uniqueFields.join(", ");
+                throw std::runtime_error("违反unique冲突");
+            }
+        }
+    }
     // 1. 字段级约束检查 (NOT NULL, Type, CHECK)
     for(const xhyfield& fieldDef : m_fields) {
         const QString& fieldName = fieldDef.name();

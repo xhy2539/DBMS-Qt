@@ -32,6 +32,8 @@ void xhyfield::set_enum_values(const QList<QString>& values) {
 }
 // xhyfield.cpp
 
+// xhyfield.cpp
+
 QString xhyfield::typestring() const {
     QString baseTypeStr;
     switch(m_type) {
@@ -41,59 +43,85 @@ QString xhyfield::typestring() const {
     case BIGINT:    baseTypeStr = "BIGINT"; break;
     case FLOAT:     baseTypeStr = "FLOAT"; break;
     case DOUBLE:    baseTypeStr = "DOUBLE"; break;
-    case DECIMAL:   baseTypeStr = "DECIMAL"; break; // 参数将在下面添加
-    case CHAR:      baseTypeStr = "CHAR"; break;    // 参数将在下面添加
-    case VARCHAR:   baseTypeStr = "VARCHAR"; break;  // 参数将在下面添加
+    case DECIMAL:   baseTypeStr = "DECIMAL"; break;
+    case CHAR:      baseTypeStr = "CHAR"; break;
+    case VARCHAR:   baseTypeStr = "VARCHAR"; break;
     case TEXT:      baseTypeStr = "TEXT"; break;
     case DATE:      baseTypeStr = "DATE"; break;
     case DATETIME:  baseTypeStr = "DATETIME"; break;
     case TIMESTAMP: baseTypeStr = "TIMESTAMP"; break;
     case BOOL:      baseTypeStr = "BOOL"; break;
-    case ENUM:      baseTypeStr = "ENUM"; break;      // 参数（枚举值）可以考虑添加
-    default:        return "UNKNOWN";
+    case ENUM:      baseTypeStr = "ENUM"; break;
+    default:        return "UNKNOWN"; // 对于未知类型直接返回
     }
+
+    QString typeAndParams = baseTypeStr; // 初始化为基本类型字符串
 
     // 为 CHAR, VARCHAR, DECIMAL 添加参数 (L, P, S)
     if (m_type == CHAR || m_type == VARCHAR) {
+        QString sizeSuffix; // 用于存储 "(length)"
         for (const QString& c : m_constraints) {
             if (c.startsWith("SIZE(", Qt::CaseInsensitive) && c.endsWith(")")) {
-                // c 的格式是 "SIZE(length)"
-                return QString("%1%2").arg(baseTypeStr).arg(c.mid(4)); // 例如 CHAR(10)
+                sizeSuffix = c.mid(4); // 获取 "(length)" 部分
+                break;
             }
         }
-        // 如果 CHAR 类型没有 SIZE 约束，SQL 标准通常默认为 CHAR(1)
-        if (m_type == CHAR) return QString("%1(1)").arg(baseTypeStr);
-        // VARCHAR 通常需要指定长度，如果没有，则可能是一个定义问题或应有默认
-        return baseTypeStr; // 或者 baseTypeStr + "(<default_or_undefined>)"
+        if (!sizeSuffix.isEmpty()) {
+            typeAndParams += sizeSuffix;
+        } else if (m_type == CHAR) {
+            // 如果 CHAR 类型没有 SIZE 约束，SQL 标准通常默认为 CHAR(1)
+            typeAndParams += "(1)";
+        }
+        // VARCHAR 如果没有指定长度，typeAndParams 保持为 "VARCHAR"
+        // (具体行为可能依赖于数据库实现或后续的默认值处理)
+
     } else if (m_type == DECIMAL) {
         QString p_str, s_str;
         bool p_found = false;
-        // bool s_found = false; // s_str 为空表示 S 未显式定义（可能默认为0）
         for (const QString& c : m_constraints) {
             if (c.startsWith("PRECISION(", Qt::CaseInsensitive) && c.endsWith(")")) {
                 p_str = c.mid(10, c.length() - 11);
                 p_found = true;
             } else if (c.startsWith("SCALE(", Qt::CaseInsensitive) && c.endsWith(")")) {
                 s_str = c.mid(6, c.length() - 7);
-                // s_found = true;
             }
         }
         if (p_found) {
+            typeAndParams += "(" + p_str;
             if (!s_str.isEmpty()) { // S 明确指定
-                return QString("%1(%2,%3)").arg(baseTypeStr, p_str, s_str);
+                typeAndParams += "," + s_str;
+            } else {
+                // SQL 标准：DECIMAL(P) 等同于 DECIMAL(P,0)
+                typeAndParams += ",0";
             }
-            return QString("%1(%2)").arg(baseTypeStr, p_str); // DECIMAL(P) 形式, S默认为0
+            typeAndParams += ")";
         }
-        return baseTypeStr; // DECIMAL 但未找到P,S约束 (可能定义不完整)
+        // 如果 DECIMAL 未找到 P,S 约束, typeAndParams 保持为 "DECIMAL"
+
     } else if (m_type == ENUM) {
         // （可选）可以进一步扩展，显示 ENUM 的值列表
-        if (!m_enumValues.isEmpty()) {
-            return QString("ENUM('%1')").arg(m_enumValues.join("','"));
-        }
-        return baseTypeStr; // "ENUM"
+        // 这会使类型字符串很长，所以默认注释掉
+        // if (!m_enumValues.isEmpty()) {
+        //     typeAndParams += QString("('%1')").arg(m_enumValues.join("','"));
+        // }
+        // typeAndParams 保持为 "ENUM"
     }
 
-    return baseTypeStr;
+    // 附加字段级别的 CHECK 约束
+    QStringList checkConstraintExpressions;
+    for (const QString& constraint : m_constraints) {
+        if (constraint.startsWith("CHECK(", Qt::CaseInsensitive) && constraint.endsWith(")")) {
+            // 添加完整的 "CHECK(...)" 字符串，通常为了统一性转为大写
+            checkConstraintExpressions.append(constraint.toUpper());
+        }
+    }
+
+    if (!checkConstraintExpressions.isEmpty()) {
+        // 如果有 CHECK 约束，将其附加到类型字符串后面，用空格隔开
+        typeAndParams += " " + checkConstraintExpressions.join(" "); // 如果有多个（不常见），也一并加入
+    }
+
+    return typeAndParams; // 返回包含类型、参数和CHECK约束的完整字符串
 }
 
 bool xhyfield::validateValue(const QString& value) const {

@@ -1803,6 +1803,16 @@ QStringList MainWindow::parseConstraints(const QString& constraints_str_input) {
     return constraints;
 }
 
+bool MainWindow::validateCheckExpression(const QString& expression) {
+    // 简确保括号匹配
+    int balance = 0;
+    for (QChar c : expression) {
+        if (c == '(') balance++;
+        else if (c == ')') balance--;
+        if (balance < 0) return false; // 括号不匹配
+    }
+    return balance == 0;
+}
 
 void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhytable &table) {
     QString constraint_str = constraint_str_input.trimmed();
@@ -1875,19 +1885,17 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
         if (columns.size() != referencedColumnsList.size()) {
             textBuffer.append("错误: FOREIGN KEY 列数量与引用的列数量不匹配。"); return;
         }
-        if(columns.size() == 1 && referencedColumnsList.size() == 1) {
-            table.add_foreign_key(columns.first(), referencedTable, referencedColumnsList.first(), constraintName);
-            textBuffer.append(QString("表约束 '%1' (FOREIGN KEY %2 REFERENCES %3(%4)) 已添加。")
-                                          .arg(constraintName, columns.first(), referencedTable, referencedColumnsList.first()));
-        } else {
-            textBuffer.append(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。 (提示: 组合外键逻辑需要在xhytable中特别处理)")
-                                          .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
-            textBuffer.append("警告: 此UI的组合外键逻辑仅为简化表示。");
-        }
+
+        // 调用修改后的 add_foreign_key 方法，传入列列表
+        table.add_foreign_key(columns, referencedTable, referencedColumnsList, constraintName); // <-- 修改此处！
+        textBuffer.append(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。")
+                              .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
+
     } else {
         textBuffer.append("错误: 不支持的表约束类型: " + constraintTypeStr);
     }
 }
+
 
 void MainWindow::show_databases() {
     auto databases = db_manager.databases();

@@ -134,7 +134,6 @@ bool xhytable::checkInsertConstraints(const QMap<QString, QString>& fieldValues)
 bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const {
     for (auto &record : m_records) {
         if(matchConditions(record, conditions)) {
-
             // 验证唯一性约束
             for (const auto& uniqueConstraint : m_uniqueConstraints.keys()) {
                 const QList<QString>& uniqueFields = m_uniqueConstraints[uniqueConstraint];
@@ -165,6 +164,7 @@ bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, con
 
                 if(uniqueConflict){
                     qWarning() << "更新失败: 唯一性约束违反，字段" << uniqueFields.join(", ");
+                    throw std::runtime_error("更新失败: 唯一性约束违反");
                     return false; // 唯一性冲突
                 }
             }
@@ -174,11 +174,13 @@ bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, con
                 if(updates.contains(field)) {
                     if(updates[field].isEmpty()) {
                         qWarning() << "更新失败: 字段" << field << "不能为空";
+                        throw std::runtime_error("更新失败:"+field.toStdString()+"不能为空");
                         return false; // 非空限制违规
                     }
                 } else {
                     if(record.value(field).isEmpty()) {
                         qWarning() << "更新失败: 字段" << field << "不能为空";
+                        throw std::runtime_error("更新失败:"+field.toStdString()+"不能为空");
                         return false;
                     }
                 }
@@ -351,9 +353,13 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValues) {
     }
 }
 
-// xhytable.cpp
+// xhytable.cpp 更新数据
 int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions, const ConditionNode & conditions) {
     int affectedRows = 0;
+    //如果有问题
+    if(checkUpdateConstraints(updates_with_expressions,conditions)){
+        return 0;
+    }
     QList<xhyrecord>* targetRecordsList = m_inTransaction ? &m_tempRecords : &m_records;
 
     for (int i = 0; i < targetRecordsList->size(); ++i) {

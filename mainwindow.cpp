@@ -555,10 +555,6 @@ void MainWindow::handleCreateTable(QString& command) { // Consider const QString
                 xhyfield new_field(field_name, type, final_constraints);
                 new_table.addfield(new_field);
             }
-
-            if (final_constraints.contains("PRIMARY_KEY", Qt::CaseInsensitive)) {
-                new_table.add_primary_key({field_name});
-            }
         }
     }
 

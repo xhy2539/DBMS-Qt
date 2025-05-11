@@ -41,11 +41,11 @@ public:
     struct FieldBlock {
         int order;
         char name[128];
-        int type;
-        int param;
-        int size;
+        int type;       // 存储 xhyfield::datatype 枚举值
+        int param;      // 应该用于存储 VARCHAR/CHAR 的长度 N，或者 DECIMAL 的精度 P
+        int size;       // 应该用于存储 DECIMAL 的小数位数 S (或者其他需要第二个参数的类型)
         SYSTEMTIME mtime;
-        int integrities;
+        int integrities; // 存储 PRIMARY_KEY, NOT_NULL, UNIQUE 的位标记
     };
 
     struct IndexBlock {

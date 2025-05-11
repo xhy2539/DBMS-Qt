@@ -73,12 +73,22 @@ public:
     bool isInTransaction() const { return m_inTransaction; }
 
     // 数据操作 (CRUD)
-    bool insertData(const QMap<QString, QString>& fieldValues);
+    bool insertData(const QMap<QString, QString>& fieldValuesFromUser);
     int updateData(const QMap<QString, QString>& updates_with_expressions, const ConditionNode& conditions);
     int deleteData(const ConditionNode& conditions);
     bool selectData(const ConditionNode& conditions, QVector<xhyrecord>& results) const;
 
     // 验证方法
+    //约束检查
+    bool checkInsertConstraints(const QMap<QString, QString>& fieldValues) const;
+    bool checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const;
+    bool checkDeleteConstraints(const ConditionNode & conditions) const;
+    bool evaluateCheckExpression(const QString& expr, const QVariantMap& fieldValues) const;//check 语句解析
+    QVariant convertStringToType(const QString& str, xhyfield::datatype type) const ;//类型转换
+
+    // 新增：设置父数据库的方法
+    void setParentDb(xhydatabase* db) { m_parentDb = db; }
+private:
     void validateRecord(const QMap<QString, QString>& values, const xhyrecord* original_record_for_update = nullptr) const;
     bool validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const;
     bool checkConstraint(const xhyfield& field, const QString& value) const; // CHECK 约束 (目前是占位符)
@@ -89,11 +99,7 @@ public:
     bool compareQVariants(const QVariant& left, const QVariant& right, const QString& op) const;
     bool matchConditions(const xhyrecord& record, const ConditionNode& condition) const;
 
-    // 新增：设置父数据库的方法
-    void setParentDb(xhydatabase* db) { m_parentDb = db; }
 
-    bool checkInsertConstraints(const QMap<QString, QString> &fieldValues) const;
-    bool checkUpdateConstraints(const QMap<QString, QString> &updates, const ConditionNode &conditions) const;
 private:
     // 新增：检查删除父记录时的外键限制 (RESTRICT)
     bool checkForeignKeyDeleteRestrictions(const xhyrecord& recordToDelete) const;

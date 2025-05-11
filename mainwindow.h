@@ -96,6 +96,8 @@ private:
     int findBalancedOperatorPos(const QString& text, const QStringList& operatorsToFind, int startPos = 0);
     ConditionNode parseSubExpression(QStringView expressionView);
     ComparisonDetails parseComparisonDetails(const QString& field, const QString& op, const QString& valuePart);
+    //check 条件括号匹配
+    bool validateCheckExpression(const QString& expression);
 
     //GUI
     popupWidget *popup;

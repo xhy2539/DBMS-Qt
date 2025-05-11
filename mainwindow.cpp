@@ -1803,6 +1803,16 @@ QStringList MainWindow::parseConstraints(const QString& constraints_str_input) {
     return constraints;
 }
 
+bool MainWindow::validateCheckExpression(const QString& expression) {
+    // 简确保括号匹配
+    int balance = 0;
+    for (QChar c : expression) {
+        if (c == '(') balance++;
+        else if (c == ')') balance--;
+        if (balance < 0) return false; // 括号不匹配
+    }
+    return balance == 0;
+}
 
 void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhytable &table) {
     QString constraint_str = constraint_str_input.trimmed();
@@ -1880,10 +1890,12 @@ void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhyt
         table.add_foreign_key(columns, referencedTable, referencedColumnsList, constraintName); // <-- 修改此处！
         textBuffer.append(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。")
                               .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
+
     } else {
         textBuffer.append("错误: 不支持的表约束类型: " + constraintTypeStr);
     }
 }
+
 
 void MainWindow::show_databases() {
     auto databases = db_manager.databases();

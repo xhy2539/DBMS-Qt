@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <QVector>
 #include <QVariant>
+#include <QDateTime>
 
 class xhytable {
 public:
@@ -46,6 +47,10 @@ public:
     xhyfield::datatype getFieldType(const QString &fieldName) const;
     bool matchConditions(const xhyrecord &record, const ConditionNode &condition) const;
 
+    //约束检查
+    bool checkInsertConstraints(const QMap<QString, QString>& fieldValues) const;
+    bool checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const;
+    bool checkDeleteConstraints(const ConditionNode & conditions) const;
 private:
     void validateRecord(const QMap<QString, QString>& values, const xhyrecord* original_record_for_update = nullptr) const;
     bool validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const;
@@ -61,10 +66,14 @@ private:
     QList<xhyrecord> m_tempRecords;
     bool m_inTransaction; // 已声明
 
-    QList<QString> m_primaryKeys;
-    QList<QMap<QString, QString>> m_foreignKeys;
-    QMap<QString, QList<QString>> m_uniqueConstraints;
-    QMap<QString, QString> m_checkConstraints;
+
+    //约束存储
+    QList<QString> m_primaryKeys;  // 主键字段列表
+    QList<QMap<QString, QString>> m_foreignKeys;  // 外键信息列表
+    QMap<QString, QList<QString>> m_uniqueConstraints; // 唯一约束映射
+    QMap<QString, QString> m_checkConstraints; // 检查约束映射
+    QSet<QString> m_notNullFields; // 非空字段集合
+    QMap<QString, QString> m_defaultValues; // 默认值映射
 };
 
 #endif // XHYTABLE_H

@@ -102,6 +102,8 @@ private:
     QList<Database> GUI_dbms;
     QString current_GUI_Db = nullptr;
 
+    QStringList textBuffer;
+
     QTabBar *tabBar;
     queryWidget *current_query;
     tableList *tablelist;

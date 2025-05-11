@@ -15,18 +15,23 @@ tableShow::~tableShow()
 
 void tableShow::setTable(xhytable table){
     ui->tableWidget->setColumnCount(table.fields().count());
-    ui->tableWidget->setRowCount(table.records().count()+1);
-    ui->tableWidget->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    ui->tableWidget->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    int column=0;
-    int row = 1;
-    for(xhyfield field : table.fields()){
-        QTableWidgetItem* item = new QTableWidgetItem(field.name()+"\n("+field.typestring()+")");
-        item->setTextAlignment(Qt::AlignTop | Qt::AlignLeft);
+    ui->tableWidget->setRowCount(table.records().count());
 
-        ui->tableWidget->setItem(0,column,item);
-        column++;
+    int row = 0;
+    QStringList headers;
+    ui->tableWidget->horizontalHeader()->setStyleSheet(
+        "QHeaderView::section {"
+        "    padding: 4px;"
+        "    qproperty-wordWrap: true;"  // 允许换行
+        "    text-align: top-left;"       // 对齐方式
+        "}"
+    );
+    for(xhyfield field : table.fields()){
+        headers << (field.name()+"\n("+field.typestring()+")");
+
     }
+    ui->tableWidget->setHorizontalHeaderLabels(headers);
+    ui->tableWidget->horizontalHeader()->setMinimumSectionSize(40);
     for(xhyrecord record : table.records()){
         int column = 0;
 
@@ -37,3 +42,9 @@ void tableShow::setTable(xhytable table){
         row++;
     }
 }
+
+void tableShow::on_tableWidget_itemChanged(QTableWidgetItem *item)
+{
+    qDebug()<<item->column();
+}
+

@@ -100,11 +100,11 @@ QString xhyfield::typestring() const {
 
     } else if (m_type == ENUM) {
         // （可选）可以进一步扩展，显示 ENUM 的值列表
-        // 这会使类型字符串很长，所以默认注释掉
-        // if (!m_enumValues.isEmpty()) {
-        //     typeAndParams += QString("('%1')").arg(m_enumValues.join("','"));
-        // }
-        // typeAndParams 保持为 "ENUM"
+        //这会使类型字符串很长，所以默认注释掉
+        if (!m_enumValues.isEmpty()) {
+            typeAndParams += QString("('%1')").arg(m_enumValues.join("','"));
+        }
+       // typeAndParams 保持为 "ENUM"
     }
 
     // 附加字段级别的 CHECK 约束

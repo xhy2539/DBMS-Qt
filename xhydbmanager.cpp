@@ -524,84 +524,89 @@ void xhydbmanager::save_database_to_file(const QString& dbname) {
 void xhydbmanager::load_databases_from_files() {
     QDir data_dir(m_dataDir + "/data"); // 确保 m_dataDir 已正确初始化
     if (!data_dir.exists()) {
-        qWarning() << "[LOAD_DB] Data directory " << data_dir.absolutePath() << " does not exist. No databases to load.";
-        if (!data_dir.mkpath(".")) {
-            qWarning() << "[LOAD_DB] Failed to create data directory " << data_dir.absolutePath();
+        qWarning() << "[LOAD_DB] 数据目录 " << data_dir.absolutePath() << " 不存在，没有数据库可加载。";
+        if (!data_dir.mkpath(".")) { //尝试创建目录
+            qWarning() << "[LOAD_DB] 创建数据目录失败 " << data_dir.absolutePath();
             return;
         }
-        qDebug() << "[LOAD_DB] Created data directory " << data_dir.absolutePath();
+        qDebug() << "[LOAD_DB] 已创建数据目录 " << data_dir.absolutePath();
     }
     QStringList db_dirs = data_dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
 
     m_databases.clear(); // 清空内存中的数据库列表
 
     for (const QString& dbname : db_dirs) {
-        // 在将表添加到数据库之前，先创建数据库对象并将其添加到管理器
-        xhydatabase databaseObj(dbname); // 创建数据库对象
+        // 先创建数据库对象并将其添加到管理器列表
+        xhydatabase databaseObj(dbname);
         m_databases.append(databaseObj); // 添加到管理器列表
         xhydatabase* currentDbPtr = &m_databases.last(); // 获取指向刚添加的数据库对象的指针
 
         QDir db_dir_path(data_dir.filePath(dbname));
         QStringList tdf_files = db_dir_path.entryList(QStringList() << "*.tdf", QDir::Files);
-        qDebug() << "[LOAD_DB] Loading database from directory:" << db_dir_path.path();
+        qDebug() << "[LOAD_DB] 正在从目录加载数据库:" << db_dir_path.path();
 
         for (const QString& tdf_filename : tdf_files) {
-            QString current_table_name = tdf_filename.left(tdf_filename.length() - 4);
-            qDebug() << "  [LOAD_DB] Attempting to load table:" << current_table_name;
+            QString current_table_name = tdf_filename.left(tdf_filename.length() - 4); // 移除 ".tdf"
+            qDebug() << "  [LOAD_DB] 尝试加载表:" << current_table_name;
 
             // 创建表对象时，传递父数据库指针
             xhytable table(current_table_name, currentDbPtr);
             bool tdf_load_successful = true;
 
-            // --- Load Table Definition (.tdf) ---
+            // --- 加载表定义文件 (.tdf) ---
             QFile tdfFile(db_dir_path.filePath(tdf_filename));
             if (tdfFile.open(QIODevice::ReadOnly)) {
                 QDataStream tdf_in_stream(&tdfFile);
                 tdf_in_stream.setVersion(QDataStream::Qt_5_15);
 
-                // 可选：如果保存了字段数量，先读取并用于循环或验证
-                // quint32 numFieldsExpected;
-                // tdf_in_stream >> numFieldsExpected;
-                // for (quint32 fieldIdx = 0; fieldIdx < numFieldsExpected; ++fieldIdx) { ... }
+                while (tdf_load_successful && !tdf_in_stream.atEnd()) {
+                    qint64 currentPosBeforeFieldBlockRead = tdfFile.pos();
 
-                while (!tdf_in_stream.atEnd()) { // 循环读取字段块，直到遇到外键数量标记或文件尾
-                    // 尝试读取一个FieldBlock，如果失败（例如到达文件尾或读取不完整），则跳出
-                    // 这个检查点是为了在字段块读完后，流指针指向外键数量
-                    qint64 currentPos = tdfFile.pos();
-                    if (currentPos + static_cast<qint64>(sizeof(FieldBlock)) > tdfFile.size() &&
-                        currentPos + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
-                        // 剩余空间不足以容纳一个 FieldBlock，但可能足以容纳 quint32 (外键数量)
-                        // 这表示字段块可能已读取完毕
+                    // 检查剩余字节是否足够容纳一个 FieldBlock
+                    // 如果不足以容纳 FieldBlock 但可能足以容纳 quint32 (外键数量标记)，则跳出字段读取循环
+                    if (currentPosBeforeFieldBlockRead + static_cast<qint64>(sizeof(FieldBlock)) > tdfFile.size() &&
+                        currentPosBeforeFieldBlockRead + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
+                        qDebug() << "  [LOAD_DB_TDF] 表 '" << current_table_name << "'：剩余空间不足以容纳 FieldBlock，可能到达外键数量标记处。";
                         break;
                     }
-                    if (currentPos >= tdfFile.size()) break; // 已到文件末尾
+                    if (currentPosBeforeFieldBlockRead >= tdfFile.size()) { // 已到文件末尾
+                        qDebug() << "  [LOAD_DB_TDF] 表 '" << current_table_name << "'：已在读取下一个字段块前到达文件末尾。";
+                        break;
+                    }
 
-                    FieldBlock fb;
+                    FieldBlock fb; // 假定 FieldBlock 已按上述提示修改
+                    // 从文件中读取原始字节到 fb 结构体
                     int bytesRead = tdf_in_stream.readRawData(reinterpret_cast<char*>(&fb), sizeof(FieldBlock));
 
-                    if (bytesRead == 0 && tdf_in_stream.atEnd()) break;
-                    if (bytesRead < static_cast<int>(sizeof(FieldBlock))) {
-                        if (tdf_in_stream.atEnd() && bytesRead > 0 && bytesRead < static_cast<int>(sizeof(quint32)) ) {
-                            // 如果文件末尾的字节数小于一个 quint32，说明没有外键数量信息，可能是旧格式文件
-                            qDebug() << "  [LOAD_DB_TDF] Reached end of file after reading partial data for table '" << current_table_name << "', assuming no FKs or old format.";
-                            tdf_load_successful = true; // 允许部分成功，没有FKs
-                            break;
-                        }
-                        qWarning() << "  [LOAD_DB_TDF] TDF read error for field block in table '" << current_table_name << "'. Expected " << sizeof(FieldBlock) << ", got " << bytesRead;
-                        tdf_load_successful = false;
+                    if (bytesRead == 0 && tdf_in_stream.atEnd()) { // 正常读到文件尾（没有更多字段块）
+                        qDebug() << "  [LOAD_DB_TDF] 表 '" << current_table_name << "'：读取字段块时正常到达文件尾。";
                         break;
+                    }
+                    if (bytesRead < static_cast<int>(sizeof(FieldBlock))) { // 读取的字节数不足一个完整的 FieldBlock
+                        qWarning() << "  [LOAD_DB_TDF] 表 '" << current_table_name << "' 中读取字段块错误。期望 "
+                                   << sizeof(FieldBlock) << " 字节, 实际读取 " << bytesRead
+                                   << " 字节。流状态: " << tdf_in_stream.status();
+                        tdf_load_successful = false; // 标记TDF加载失败
+                        break; // 终止读取此TDF文件
                     }
 
                     QString field_name_str = QString::fromUtf8(fb.name, strnlen(fb.name, sizeof(fb.name)));
-                    if (field_name_str.isEmpty()) { // 可能读到了文件末尾的填充或无效数据
-                        qDebug() << "  [LOAD_DB_TDF] Encountered empty field name, assuming end of field blocks for " << current_table_name;
-                        // 把流指针回退到 fb 开始的位置，因为这可能不是一个有效的 fb
-                        tdfFile.seek(currentPos);
+
+                    // 简单的有效性检查，防止因文件末尾的填充数据导致空字段名
+                    if (field_name_str.isEmpty() && fb.type == 0 && fb.param == 0 && fb.size == 0) {
+                        qDebug() << "  [LOAD_DB_TDF] 表 '" << current_table_name << "'：遇到可能是填充或结束的空字段块，回退流指针。";
+                        tdfFile.seek(currentPosBeforeFieldBlockRead); // 回退，以便后续正确读取外键数量
                         break;
                     }
+                    if (field_name_str.isEmpty()){
+                        qWarning() << "  [LOAD_DB_TDF] 表 '" << current_table_name << "' 中读取到字段名为空的字段块。类型: " << fb.type << "。跳过此字段。";
+                        continue; // 跳过这个可能损坏的字段块
+                    }
+
 
                     xhyfield::datatype type = static_cast<xhyfield::datatype>(fb.type);
                     QStringList constraints;
+                    // 根据 fb.integrities 解析约束
                     if (fb.integrities & 0x01) constraints.append("PRIMARY_KEY");
                     if (fb.integrities & 0x02) constraints.append("NOT_NULL");
                     if (fb.integrities & 0x04) constraints.append("UNIQUE"); // 字段级 UNIQUE
@@ -609,32 +614,64 @@ void xhydbmanager::load_databases_from_files() {
                     // 根据 fb.param 和 fb.size 添加 SIZE, PRECISION, SCALE 约束
                     if ((type == xhyfield::CHAR || type == xhyfield::VARCHAR) && fb.param > 0) {
                         constraints.append(QString("SIZE(%1)").arg(fb.param));
-                    } else if (type == xhyfield::DECIMAL && fb.param > 0) { // fb.param 是精度 P
+                    } else if (type == xhyfield::DECIMAL && fb.param > 0) {
                         constraints.append(QString("PRECISION(%1)").arg(fb.param));
                         constraints.append(QString("SCALE(%1)").arg(fb.size)); // fb.size 是标度 S
                     }
-                    table.addfield(xhyfield(field_name_str, type, constraints));
-                } // End while TDF fields
 
+                    // *** 为 ENUM 类型加载允许值列表的修改 ***
+                    xhyfield loaded_field(field_name_str, type, constraints);
+                    if (type == xhyfield::ENUM) {
+                        // 假设 fb.enum_values_str 是空终止的，或者在保存时对于非ENUM类型其首字节为'\0'
+                        if (fb.enum_values_str[0] != '\0') {
+                            QString enums_combined_str = QString::fromUtf8(fb.enum_values_str);
+                            // 假设保存时用逗号分隔，且值不包含逗号或已妥善处理
+                            QStringList enum_vals_list = enums_combined_str.split(',', Qt::SkipEmptyParts);
+                            QStringList cleaned_enum_vals_list;
+                            for (const QString& val : enum_vals_list) {
+                                // ENUM 值在存储和比较时通常不带引号，所以这里只做 trim
+                                QString trimmedVal = val.trimmed();
+                                if (!trimmedVal.isEmpty()) {
+                                    cleaned_enum_vals_list.append(trimmedVal);
+                                }
+                            }
+                            loaded_field.set_enum_values(cleaned_enum_vals_list);
+                            qDebug() << "    [LOAD_DB_TDF_ENUM] 表 '" << current_table_name << "'，字段 '" << field_name_str << "'：加载的ENUM值列表：" << cleaned_enum_vals_list;
+                        } else {
+                            qDebug() << "    [LOAD_DB_TDF_ENUM] 表 '" << current_table_name << "'，ENUM字段 '" << field_name_str << "' 在TDF中未指定枚举值列表 (或列表为空)。";
+                            // loaded_field.m_enumValues 将保持为空，这与之前导致问题的状态一致
+                        }
+                    }
+                    table.addfield(loaded_field); // 将字段（可能已设置ENUM值）添加到表中
+                    // *** ENUM 修改结束 ***
 
-                // 读取外键信息
-                if (tdf_load_successful && !tdfFile.atEnd()) {
+                } // 结束 while TDF fields 循环
+
+                // 加载外键信息 (保持您原有的逻辑，但增加流状态检查)
+                if (tdf_load_successful && !tdfFile.atEnd()) { // 仅在TDF字段加载成功且文件未读完时尝试加载外键
                     quint32 numForeignKeys = 0;
-                    if (tdfFile.pos() + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
-                        tdf_in_stream >> numForeignKeys;
-                    } else if (!tdfFile.atEnd()){
-                        qWarning() << "    [LOAD_DB_TDF] Not enough data left to read foreign key count for " << current_table_name;
+                    // 在读取外键数量前检查流状态
+                    if (tdf_in_stream.status() == QDataStream::Ok) {
+                        if (tdfFile.pos() + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
+                            tdf_in_stream >> numForeignKeys;
+                        } else if (!tdfFile.atEnd()){
+                            qWarning() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：剩余数据不足以读取外键数量。";
+                        }
+                    } else {
+                        qWarning() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：在读取外键数量前流状态已出错。状态：" << tdf_in_stream.status();
+                        tdf_load_successful = false;
                     }
 
+
                     if (tdf_in_stream.status() == QDataStream::Ok && numForeignKeys > 0) {
-                        qDebug() << "    [LOAD_DB_TDF] Expecting" << numForeignKeys << "foreign key definitions for table" << current_table_name;
-                        for (quint32 i = 0; i < numForeignKeys; ++i) {
+                        qDebug() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：期望加载 " << numForeignKeys << " 个外键定义。";
+                        for (quint32 i = 0; i < numForeignKeys && tdf_load_successful; ++i) { // 增加 tdf_load_successful 条件
                             QString constraintName, refTable;
-                            quint32 numMappings = 0; // 新增：读取列映射的数量
+                            quint32 numMappings = 0;
                             tdf_in_stream >> constraintName >> refTable >> numMappings;
 
                             if (tdf_in_stream.status() != QDataStream::Ok) {
-                                qWarning() << "    [LOAD_DB_TDF] Error reading FK header for " << current_table_name;
+                                qWarning() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：读取外键头信息 (第 " << (i + 1) << " 个) 时出错。状态：" << tdf_in_stream.status();
                                 tdf_load_successful = false; break;
                             }
 
@@ -644,7 +681,7 @@ void xhydbmanager::load_databases_from_files() {
                                 QString childCol, refCol;
                                 tdf_in_stream >> childCol >> refCol;
                                 if (tdf_in_stream.status() != QDataStream::Ok) {
-                                    qWarning() << "    [LOAD_DB_TDF] Error reading FK mapping " << (j + 1) << " for " << current_table_name;
+                                    qWarning() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：读取外键映射 (第 " << (j + 1) << " 个，外键 #" << (i+1) << ") 时出错。状态：" << tdf_in_stream.status();
                                     tdf_load_successful = false; break;
                                 }
                                 childColumns.append(childCol);
@@ -652,81 +689,122 @@ void xhydbmanager::load_databases_from_files() {
                             }
                             if (!tdf_load_successful) break; // 如果内层循环出错，跳出外层循环
 
-                            table.add_foreign_key(childColumns, refTable, referencedColumns, constraintName); // <-- 调用新的 add_foreign_key
-                            qDebug() << "      [LOAD_DB_TDF_FK] Loaded FK:" << constraintName;
+                            try {
+                                table.add_foreign_key(childColumns, refTable, referencedColumns, constraintName);
+                                qDebug() << "      [LOAD_DB_TDF_FK] 表 '" << current_table_name << "'：已加载外键 '" << constraintName << "'";
+                            } catch (const std::runtime_error& e) {
+                                qWarning() << "      [LOAD_DB_TDF_FK] 表 '" << current_table_name << "'：添加外键 '" << constraintName << "' 失败：" << e.what();
+                                // 可以选择标记 tdf_load_successful = false; 或者仅记录错误并继续
+                            }
                         }
                     } else if (tdf_in_stream.status() != QDataStream::Ok && numForeignKeys > 0) {
-                        qWarning() << "    [LOAD_DB_TDF] Stream error while trying to read foreign key count for " << current_table_name;
+                        qWarning() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：读取外键数量后流状态出错 (或数量 > 0 但流出错)。状态：" << tdf_in_stream.status();
                         tdf_load_successful = false;
-                    } else if (numForeignKeys == 0) {
-                        qDebug() << "    [LOAD_DB_TDF] Table " << current_table_name << " has 0 foreign keys defined in TDF.";
+                    } else if (numForeignKeys == 0 && tdf_in_stream.status() == QDataStream::Ok) {
+                        qDebug() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "' 在TDF中定义了 0 个外键或未找到外键部分。";
                     }
                 } else if (tdf_load_successful && tdfFile.atEnd()) {
-                    qDebug() << "    [LOAD_DB_TDF] Reached end of TDF for " << current_table_name << " after field blocks, no FK count found (or 0 FKs).";
+                    qDebug() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：在字段块后已到达文件末尾，未找到外键数量（假定0个外键）。";
+                } else if (!tdf_load_successful) {
+                    qDebug() << "    [LOAD_DB_TDF] 表 '" << current_table_name << "'：因之前的TDF读取错误，跳过外键加载。";
                 }
                 tdfFile.close();
             } else { // TDF 文件打开失败
-                qWarning() << "  [LOAD_DB] Failed to open TDF file:" << tdfFile.fileName() << ". Skipping table.";
+                qWarning() << "  [LOAD_DB] 打开TDF文件失败:" << tdfFile.fileName() << "。跳过此表。错误: " << tdfFile.errorString();
                 tdf_load_successful = false;
             }
 
             if (!tdf_load_successful) {
-                qWarning() << "  [LOAD_DB] Skipping TRD load for table '" << current_table_name << "' due to TDF load error.";
-                continue; // 跳过此表，处理下一个TDF文件
+                qWarning() << "  [LOAD_DB] 表 '" << current_table_name << "' 的TDF文件加载失败，跳过TRD加载。";
+                continue; // 跳过此表的剩余处理，处理下一个TDF文件
             }
-            if (table.fields().isEmpty()) { // 即使TDF加载“成功”，但没有字段定义，也是无效的表
-                qWarning() << "  [LOAD_DB] Table '" << current_table_name << "' has no fields defined after TDF load. Skipping TRD load.";
-                continue;
+            // 如果TDF加载成功，但没有定义任何字段 (且不是一个特殊的内部空表)
+            if (table.fields().isEmpty() && !current_table_name.contains("_temp_")) { // 示例：允许名为 _temp_ 的表为空
+                qWarning() << "  [LOAD_DB] 表 '" << current_table_name << "' 在TDF加载后没有定义任何字段。可能跳过TRD加载。";
+                // 根据您的设计，一个没有字段的表是否有效。如果无效，可以 continue;
             }
 
-            // --- Load Record Data (.trd) ---
+            // --- 加载记录数据 (.trd) --- (保持您原有的逻辑，但增加流状态检查和对空记录的处理)
             QString trdFilePath = db_dir_path.filePath(current_table_name + ".trd");
             QFile trdFile(trdFilePath);
-            bool trd_processing_error_occurred = false; // Flag for critical errors within TRD processing
+            bool trd_processing_error_occurred = false;
 
             if (trdFile.exists() && trdFile.open(QIODevice::ReadOnly)) {
                 QDataStream record_file_stream(&trdFile);
                 record_file_stream.setVersion(QDataStream::Qt_5_15);
-                qDebug() << "    [LOAD_DB_TRD] Loading TRD for table:" << current_table_name << "from" << trdFilePath;
+                qDebug() << "    [LOAD_DB_TRD] 正在为表 '" << current_table_name << "' 从 '" << trdFilePath << "' 加载TRD。";
 
                 while (!record_file_stream.atEnd()) {
-                    if (trd_processing_error_occurred) break; // Stop if a critical error happened in a previous record
-
-                    quint32 record_total_size_from_file;
-                    record_file_stream >> record_total_size_from_file;
-                    if (record_file_stream.status() != QDataStream::Ok) {
-                        if (!record_file_stream.atEnd())
-                            qWarning() << "    [LOAD_DB_TRD] Failed to read record size for '" << current_table_name << "'. Status: " << record_file_stream.status();
+                    if (trd_processing_error_occurred) { // 如果之前的记录处理发生严重错误，停止处理此文件
+                        qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：因之前的记录错误，中止TRD加载。";
                         break;
                     }
+
+                    quint32 record_total_size_from_file;
+                    // 读取记录大小前检查流状态
+                    if(record_file_stream.status() != QDataStream::Ok) {
+                        qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：读取记录大小前流状态已出错。";
+                        trd_processing_error_occurred = true; break;
+                    }
+                    record_file_stream >> record_total_size_from_file;
+                    if (record_file_stream.status() != QDataStream::Ok) {
+                        if (!record_file_stream.atEnd()) { // 避免在正常文件末尾时也报警告
+                            qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：读取记录大小失败。状态：" << record_file_stream.status();
+                        } else {
+                            qDebug() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：读取记录大小到达文件尾。";
+                        }
+                        break; // 无法读取大小，无法继续
+                    }
+
+                    // 处理0字节记录（可能用于空表或特殊标记）
+                    if (record_total_size_from_file == 0) {
+                        if (table.fields().isEmpty()) {
+                            qDebug() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'（无字段）：读取到0字节记录，添加空记录。";
+                            table.addrecord(xhyrecord()); // 如果表允许无字段记录
+                        } else {
+                            qDebug() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'（有字段）：读取到0字节记录，跳过此空记录。";
+                        }
+                        continue; // 处理下一条记录
+                    }
+
 
                     QByteArray record_data_buffer(record_total_size_from_file, Qt::Uninitialized);
                     int bytes_actually_read = record_file_stream.readRawData(record_data_buffer.data(), record_total_size_from_file);
 
                     if (bytes_actually_read < static_cast<int>(record_total_size_from_file)) {
-                        qWarning() << "    [LOAD_DB_TRD] Failed to read full record data for '" << current_table_name
-                                   << "'. Expected: " << record_total_size_from_file << ", Got: " << bytes_actually_read
-                                   << ". Stream status: " << record_file_stream.status();
+                        qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：读取完整记录数据失败。期望："
+                                   << record_total_size_from_file << "字节, 实际读取：" << bytes_actually_read
+                                   << "字节。流状态：" << record_file_stream.status();
+                        trd_processing_error_occurred = true; // 严重错误，可能影响后续记录
                         break;
                     }
 
-                    QDataStream field_parse_stream(record_data_buffer);
+                    QDataStream field_parse_stream(record_data_buffer); // 用记录数据块创建新的流
                     field_parse_stream.setVersion(QDataStream::Qt_5_15);
                     xhyrecord new_loaded_record;
+                    bool current_record_field_read_error = false; // 标记当前记录内部的字段读取是否有错
 
                     for (const auto& field_def : table.fields()) {
+                        if (field_parse_stream.atEnd()) { // 数据块提前结束
+                            qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'，字段 '" << field_def.name() << "'：记录数据块提前结束，字段数据不完整。";
+                            current_record_field_read_error = true; break;
+                        }
+
                         QString value_to_insert_in_record;
                         quint8 is_null_marker;
 
+                        if (field_parse_stream.status() != QDataStream::Ok) { /* 字段解析流状态错误 */ current_record_field_read_error = true; break; }
                         field_parse_stream >> is_null_marker;
                         if (field_parse_stream.status() != QDataStream::Ok) {
-                            qWarning() << "    [LOAD_DB_TRD] CRITICAL: Failed to read null marker for field '" << field_def.name() << "' in table '" << current_table_name << "'. Aborting TRD load for this table.";
-                            trd_processing_error_occurred = true; // Set flag
-                            break; // Exit field loop for this record
+                            qWarning() << "    [LOAD_DB_TRD] 严重错误：表 '" << current_table_name << "'，字段 '" << field_def.name() << "'：读取NULL标记失败。中止此表TRD加载。";
+                            trd_processing_error_occurred = true;
+                            current_record_field_read_error = true;
+                            break;
                         }
 
-                        if (is_null_marker == 0) { // Value IS NOT NULL
+                        if (is_null_marker == 0) { // 值非NULL
                             QDataStream::Status field_read_status = QDataStream::Ok;
+                            // (保持您原有的 switch-case 来读取各种类型的值)
                             switch (field_def.type()) {
                             case xhyfield::TINYINT:  { qint8 val;     field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
                             case xhyfield::SMALLINT: { qint16 val;    field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
@@ -734,58 +812,95 @@ void xhydbmanager::load_databases_from_files() {
                             case xhyfield::BIGINT:   { qlonglong val; field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
                             case xhyfield::FLOAT:    { float val;     field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
                             case xhyfield::DOUBLE:   { double val;    field_parse_stream >> val; value_to_insert_in_record = QString::number(val); field_read_status = field_parse_stream.status(); break;}
-                            case xhyfield::DECIMAL:
+                            case xhyfield::DECIMAL: // DECIMAL, CHAR等作为字符串存储和读取
                             case xhyfield::CHAR:
                             case xhyfield::VARCHAR:
                             case xhyfield::TEXT:
                             case xhyfield::ENUM:     { QByteArray strBytes; field_parse_stream >> strBytes; value_to_insert_in_record = QString::fromUtf8(strBytes); field_read_status = field_parse_stream.status(); break;}
-                            case xhyfield::DATE:     { QDate date; field_parse_stream >> date; if(date.isValid()) value_to_insert_in_record = date.toString("yyyy-MM-dd"); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::DATE:     { QDate date; field_parse_stream >> date; if(date.isValid()) value_to_insert_in_record = date.toString(Qt::ISODate); else value_to_insert_in_record = QString(); field_read_status = field_parse_stream.status(); break;}
                             case xhyfield::DATETIME:
-                            case xhyfield::TIMESTAMP:{ QDateTime datetime; field_parse_stream >> datetime; if(datetime.isValid()) value_to_insert_in_record = datetime.toString("yyyy-MM-dd HH:mm:ss"); field_read_status = field_parse_stream.status(); break;}
+                            case xhyfield::TIMESTAMP:{ QDateTime datetime; field_parse_stream >> datetime; if(datetime.isValid()) value_to_insert_in_record = datetime.toString(Qt::ISODate); else value_to_insert_in_record = QString(); field_read_status = field_parse_stream.status(); break;}
                             case xhyfield::BOOL:     { bool boolValue; field_parse_stream >> boolValue; value_to_insert_in_record = boolValue ? "1" : "0"; field_read_status = field_parse_stream.status(); break;}
                             default:
-                                qWarning() << "    [LOAD_DB_TRD] Unhandled data type for field '" << field_def.name() << "' (Type ID: " << static_cast<int>(field_def.type()) << "). Reading as QByteArray.";
+                                qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'，字段 '" << field_def.name() << "'：未处理的数据类型 (ID: " << static_cast<int>(field_def.type()) << ")。尝试作为QByteArray读取。";
                                 QByteArray unknownData;
                                 if (!field_parse_stream.atEnd()) field_parse_stream >> unknownData;
-                                value_to_insert_in_record = QString::fromUtf8(unknownData);
+                                value_to_insert_in_record = QString::fromUtf8(unknownData); // 可能不正确
                                 field_read_status = field_parse_stream.status();
                                 break;
                             }
+
                             if (field_read_status != QDataStream::Ok) {
-                                qWarning() << "    [LOAD_DB_TRD] Stream error after attempting to read non-NULL field '" << field_def.name()
-                                << "' in table '" << current_table_name << "'. Status: " << field_read_status << ". Setting field to NULL.";
-                                value_to_insert_in_record = QString();
+                                qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'，字段 '" << field_def.name() << "'：读取非NULL值后流状态错误。状态：" << field_read_status << "。此字段值将设为NULL。";
+                                value_to_insert_in_record = QString(); // 设为SQL NULL
                             }
+                        } else { // 值是NULL (is_null_marker == 1)
+                            value_to_insert_in_record = QString(); // QString() 代表 SQL NULL
                         }
                         new_loaded_record.insert(field_def.name(), value_to_insert_in_record);
-                    } // end for fields in record
+                    } // 结束 for fields in record 循环
 
-                    if (trd_processing_error_occurred) { // If error reading a field's null marker
-                        qWarning() << "    [LOAD_DB_TRD] Aborted reading current record due to previous field read error in table " << current_table_name;
-                        break; // Exit record loop (while !record_file_stream.atEnd())
+                    if (current_record_field_read_error || trd_processing_error_occurred) {
+                        qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：因字段读取错误，中止处理当前记录。";
+                        if(trd_processing_error_occurred) break; // 如果是严重错误，中止整个TRD文件处理
+                        continue; // 否则，跳过此损坏的记录，尝试下一条
                     }
 
-                    if (field_parse_stream.status() != QDataStream::Ok && !field_parse_stream.atEnd()){
-                        qWarning() << "    [LOAD_DB_TRD] Record parser: Stream has unread data or error for table '" << current_table_name
-                                   << "' after processing all fields. Stream status: " << field_parse_stream.status();
+                    // 检查记录数据块是否有多余未读数据
+                    if (!field_parse_stream.atEnd() && field_parse_stream.status() == QDataStream::Ok){
+                        qWarning() << "    [LOAD_DB_TRD] 表 '" << current_table_name << "'：记录解析器在处理完所有预期字段后，流中仍有未读数据或状态错误。字节剩余："
+                                   << field_parse_stream.device()->bytesAvailable()
+                                   << "。流状态：" << field_parse_stream.status() << "。此记录可能已损坏。";
                     }
                     table.addrecord(new_loaded_record);
-                } // end while records in TRD
+                } // 结束 while records in TRD 循环
                 trdFile.close();
-            } else { // TRD file handling
-                if(QFile::exists(trdFilePath)) {
-                    qWarning() << "    [LOAD_DB] Failed to open TRD file for reading (but it exists):" << trdFilePath;
-                } else {
-                    qDebug() << "    [LOAD_DB] TRD file not found (this is normal for a new or empty table):" << trdFilePath;
+            } else { // TRD 文件处理 (打开失败或不存在)
+                if(QFile::exists(trdFilePath)) { // 文件存在但打开失败
+                    qWarning() << "    [LOAD_DB] 打开TRD文件进行读取失败 (但文件存在): " << trdFilePath << " 错误: " << trdFile.errorString();
+                } else { // 文件不存在
+                    qDebug() << "    [LOAD_DB] TRD文件未找到 (对于新表或空表是正常的): " << trdFilePath;
                 }
             }
-             currentDbPtr->addTable(table); // Add the fully populated (or partially if TRD errors) table to the database object
-        } // end for TDF files (tables)
-     // Add the database to the manager's list
-    } // end for DB directories
-    qDebug() << "[LOAD_DB] Finished loading all databases and tables.";
-}
+            // currentDbPtr->addTable(table); // 将加载完成的表添加到当前数据库对象中
+            // 注意：在您的原始代码中，addTable是在外层循环后执行的。
+            // 我的理解是，每个 TDF 文件对应一个表，加载完 TDF 和 TRD 后，这个 table 对象就应该添加到 currentDbPtr。
+            // 如果 currentDbPtr->addTable(table) 是在 tdf_files 循环之后，那么只有最后一个 table 会被添加。
+            // 假设您的 xhydatabase::addTable 是拷贝语义，并且应该在每个表加载完成后调用。
+            // 但由于 'table' 是在 tdf_files 循环内声明的，它在每次迭代时都会被重新创建。
+            // 所以，要么 addTable 在这里，要么您需要一个 QList<xhytable> tables_for_this_db，
+            // 在循环内 table.add(...)，循环后再 currentDbPtr->setTables(tables_for_this_db)。
+            // 鉴于您之前的代码结构，`currentDbPtr->addTable(table);` 应该在 `tdf_files` 循环的末尾，
+            // 但是这意味着您`m_databases`中的`databaseObj`需要一个`addTable`方法，
+            // 而 `currentDbPtr`是指向`m_databases.last()`的。所以`currentDbPtr->addTable(table)`是对的。
+            // **已确认：** 您的 `xhydatabase.cpp` 中有 `void xhydatabase::addTable(const xhytable& table)`，它执行 `m_tables.append(table)`。
+            // 所以，在 `tdf_files` 循环的末尾（但在 continue 之前）调用 `currentDbPtr->addTable(table)` 是正确的。
+            // 但前提是，如果 `tdf_load_successful` 为 false，或者 `table.fields().isEmpty()`，我们 `continue` 了，
+            // 就不应该执行 `addTable`。
+            if (tdf_load_successful && !(table.fields().isEmpty() && !current_table_name.contains("_temp_"))) {
+                // 只有当 TDF 成功加载且表有效（有字段或为特殊表）时才添加
+                // currentDbPtr->addTable(table); // 这个调用已在 xhyttable 构造时通过父指针关联，
+                // 且 xhydatabase::m_tables 是 QList<xhytable>，
+                // xhytable 对象直接在 m_tables 中构造或复制。
+                // 在这种模型下，不需要显式调用 addTable，
+                // xhytable 对象 'table' 在循环结束时会析构，
+                // 我们需要确保其内容已正确复制到 currentDbPtr->m_tables 中。
 
+                // 查看 xhydatabase.h/cpp:
+                // xhydatabase::m_tables 是 QList<xhytable>
+                // xhytable table(current_table_name, currentDbPtr); 创建一个栈对象
+                // currentDbPtr->addTable(table); (如您原代码) 会将这个栈对象的拷贝添加到 currentDbPtr->m_tables
+                // 这是可以的。
+                // 之前的代码中，这一行是 databaseObj.addTable(table); 然后 m_databases.append(databaseObj);
+                // 我改成了 m_databases.append(databaseObj); currentDbPtr = &m_databases.last();
+                // ... currentDbPtr->addTable(table);  <-- 这才是正确的，将表添加到已在m_databases中的对象。
+                currentDbPtr->addTable(table);
+            }
+
+        } // 结束 for TDF files (tables) 循环
+    } // 结束 for DB directories 循环
+    qDebug() << "[LOAD_DB] 完成所有数据库和表的加载。";
+}
 
 xhydatabase* xhydbmanager::find_database(const QString& dbname) {
     for (auto& db : m_databases) {
@@ -819,8 +934,7 @@ void xhydbmanager::save_table_definition_file(const QString& filePath, const xhy
     qDebug() << "[SAVE_TDF] Saving TDF for table:" << table->name() << "to" << filePath;
 
     // 1. 保存字段数量 (可选，但有助于加载时验证)
-    // quint32 numFields = static_cast<quint32>(table->fields().size());
-    // out << numFields;
+
 
     for (const auto& field : table->fields()) {
         FieldBlock fb;
@@ -854,6 +968,11 @@ void xhydbmanager::save_table_definition_file(const QString& filePath, const xhy
             }
             // DECIMAL 通常需要 PRECISION，SCALE 默认为 0
             if (!precisionFound) { /* qWarning or default precision */ }
+        }if (field.type() == xhyfield::ENUM) {
+            QString enums_combined = field.enum_values().join(','); // 使用逗号分隔
+            qstrncpy(fb.enum_values_str, enums_combined.toUtf8().constData(), sizeof(fb.enum_values_str) - 1);
+        } else {
+            fb.enum_values_str[0] = '\0'; // 对于非ENUM类型，确保为空字符串
         }
 
         fb.integrities = 0;

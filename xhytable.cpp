@@ -573,13 +573,53 @@ bool xhytable::createtable(const xhytable& table) {
 }
 
 void xhytable::add_primary_key(const QStringList& keys) {
+    if (keys.isEmpty()) {
+        qWarning() << "[add_primary_key] 表 '" << m_name << "'：尝试添加空的主键列表。";
+        // 也可以考虑抛出异常
+        // throw std::runtime_error("主键列表不能为空。");
+        return;
+    }
+
     for (const QString& key : keys) {
-        if (has_field(key) && !m_primaryKeys.contains(key, Qt::CaseInsensitive)) {
-            m_primaryKeys.append(key);
-        } else if (!has_field(key)) {
-            qWarning() << "添加主键失败：字段 " << key << " 不存在于表 " << m_name;
+        // 1. 检查字段是否存在于表中
+        const xhyfield* field_ptr = get_field(key); // 使用 get_field 进行大小写不敏感查找
+        if (field_ptr) {
+            // 使用从 get_field 获取的、大小写正确的字段名
+            const QString& actualFieldName = field_ptr->name();
+
+            // 2. 添加到 m_primaryKeys 列表 (如果尚不存在)
+            //    注意：m_primaryKeys 的比较也应该大小写不敏感，或者存储规范化的大小写形式。
+            //    假设 contains 和 append 已处理大小写或您已规范化。
+            //    为了安全，我们使用 get_field 返回的实际字段名。
+            bool foundInPrimaryKeys = false;
+            for (const QString& pk : m_primaryKeys) {
+                if (pk.compare(actualFieldName, Qt::CaseInsensitive) == 0) {
+                    foundInPrimaryKeys = true;
+                    break;
+                }
+            }
+            if (!foundInPrimaryKeys) {
+                m_primaryKeys.append(actualFieldName);
+            }
+
+            // 3. **【核心修改】将主键的组成列添加到 m_notNullFields 集合**
+            //    确保字段名的大小写与 m_notNullFields 中存储的名称一致。
+            //    m_notNullFields 在 addfield 中使用 field.name() 插入。
+            if (!m_notNullFields.contains(actualFieldName)) { // 避免重复插入和日志输出
+                m_notNullFields.insert(actualFieldName);
+                qDebug() << "[add_primary_key] 表 '" << m_name << "'：将主键字段 '" << actualFieldName << "' 隐式标记为 NOT NULL。";
+            }
+        } else {
+            // 如果主键中指定的字段在表中不存在
+            qWarning() << "[add_primary_key] 添加主键失败：字段 '" << key << "' 在表 '" << m_name << "' 中不存在。";
+            // 在生产环境中，这里应该抛出异常，以中断 CREATE TABLE 操作
+            // throw std::runtime_error(("添加主键失败：主键中指定的字段 '" + key + "' 不存在于表 '" + m_name + "'。").toStdString());
+            // 如果不抛出异常，至少要确保操作的原子性，可能需要回滚部分表定义。
+            // 为了简单起见，这里仅输出警告。但这意味着可能创建出一个无效的表定义。
         }
     }
+    qDebug() << "[add_primary_key] 表 '" << m_name << "' 的主键列更新为：" << m_primaryKeys;
+    qDebug() << "[add_primary_key] 表 '" << m_name << "' 的非空字段集合更新为：" << m_notNullFields;
 }
 void xhytable::add_foreign_key(const QStringList& childColumns,
                                const QString& referencedTable,

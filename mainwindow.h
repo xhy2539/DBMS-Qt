@@ -76,6 +76,7 @@ private slots:
 
     void on_tabWidget_tabCloseRequested(int index);
 
+    void openRegisterUserDialog(); // 添加
 
 private:
     void execute_command(const QString& command);

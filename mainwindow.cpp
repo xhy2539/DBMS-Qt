@@ -993,6 +993,28 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         return node;
     }
 
+    // zyh在这里加了这样一段，然后就可以处理BETWEEN ... AND ...语句了
+    if (expression.contains("BETWEEN", Qt::CaseInsensitive)) {
+        // 解析 BETWEEN ... AND ...
+        QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatch match = betweenRegex.match(expression);
+
+        if (match.hasMatch()) {
+            QString field = match.captured(1).trimmed();
+            QString value1 = match.captured(2).trimmed();
+            QString value2 = match.captured(3).trimmed();
+
+            node.type = ConditionNode::COMPARISON_OP;
+            node.comparison.fieldName = field;
+            node.comparison.operation = "BETWEEN";
+            node.comparison.value = parseLiteralValue(value1);
+            node.comparison.value2 = parseLiteralValue(value2);
+
+            qDebug() << "Parsed BETWEEN: Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
+            return node;
+        }
+    }
+
     // 3. 处理逻辑运算符 OR, AND ... (这部分代码与您之前提供的版本相同，保持不变)
     QPair<int, QString> opDetails = findLowestPrecedenceOperator(expression, {"OR", "AND"});
     if (opDetails.first != -1) {

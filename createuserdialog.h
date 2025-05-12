@@ -3,6 +3,9 @@
 #define CREATEUSERDIALOG_H
 
 #include <QDialog>
+// 前向声明：告诉编译器有这些类，但不需要知道它们的完整定义，
+class UserFileManager;
+class xhydbmanager;
 
 namespace Ui {
 class CreateUserDialog;
@@ -13,7 +16,7 @@ class CreateUserDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit CreateUserDialog(QWidget *parent = nullptr);
+    explicit CreateUserDialog(UserFileManager *accountManager, xhydbmanager *dbManager, QWidget *parent = nullptr);
     ~CreateUserDialog();
 
     QString getUsername() const;
@@ -27,6 +30,8 @@ private slots:
 
 private:
     Ui::CreateUserDialog *ui;
+    UserFileManager *m_accountManager;
+    xhydbmanager *m_dbManager;
 };
 
 #endif // CREATEUSERDIALOG_H

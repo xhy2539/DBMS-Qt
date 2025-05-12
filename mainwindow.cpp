@@ -2470,7 +2470,7 @@ void MainWindow::on_tabWidget_tabCloseRequested(int index)
 
 void MainWindow::openRegisterUserDialog()
 {
-    CreateUserDialog createUserDialog(this); // 创建注册用户对话框实例
+    CreateUserDialog createUserDialog(&Account,&db_manager,this); // 创建注册用户对话框实例
     createUserDialog.exec();
 }
 

@@ -24,7 +24,7 @@ signals:
 private slots:
     void on_listWidget_itemDoubleClicked(QListWidgetItem *item);
 
-    void on_pushButton_released();
+    void on_openTable_released();
 
     void on_listWidget_itemClicked(QListWidgetItem *item);
 

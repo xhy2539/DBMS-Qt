@@ -36,6 +36,12 @@
      </property>
      <item>
       <widget class="QPushButton" name="addRecord">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="text">
         <string>添加记录</string>
        </property>
@@ -43,6 +49,12 @@
      </item>
      <item>
       <widget class="QPushButton" name="deleteRecord">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="text">
         <string>删除记录</string>
        </property>
@@ -50,6 +62,12 @@
      </item>
      <item>
       <widget class="QPushButton" name="comfirm">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="text">
         <string>确定</string>
        </property>
@@ -57,6 +75,12 @@
      </item>
      <item>
       <widget class="QPushButton" name="cancle">
+       <property name="sizePolicy">
+        <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+         <horstretch>0</horstretch>
+         <verstretch>0</verstretch>
+        </sizepolicy>
+       </property>
        <property name="text">
         <string>取消</string>
        </property>

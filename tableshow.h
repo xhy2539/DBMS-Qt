@@ -17,11 +17,10 @@ public:
     explicit tableShow(QWidget *parent = nullptr , QString dbName = nullptr );
     ~tableShow();
     void setTable(xhytable table);
+    void resetButton(bool yes);
 signals:
-    void dataChanged(QString database,QString sql);
+    void dataChanged(const QString& sql);
 private slots:
-    void on_tableWidget_itemChanged(QTableWidgetItem *item);
-
     void on_addRecord_released();
 
     void on_deleteRecord_released();

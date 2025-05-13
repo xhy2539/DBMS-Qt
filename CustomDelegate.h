@@ -22,7 +22,7 @@ public:
     void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override {
         QStyledItemDelegate::setModelData(editor, model, index);
         QString newValue = model->data(index, Qt::DisplayRole).toString();
-        emit dataChanged(index.row(), index.column(), oldValue, newValue); // 发射信号
+        if(oldValue != newValue) emit dataChanged(index.row(), index.column(), oldValue, newValue); // 发射信号
     }
 
 signals:

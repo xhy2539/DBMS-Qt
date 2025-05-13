@@ -19,7 +19,22 @@ tableShow::tableShow(QWidget *parent, QString dbName )
     connect(delegate, &CustomDelegate::dataChanged,[=](int row, int col, const QString &oldVal, const QString &newVal) {
         if(row < m_table.records().count()){
             // qDebug() << "行:" << row << "列:" << col << "旧值:" << oldVal << "新值:" << newVal <<m_table.records().count();
+            // qDebug()<<" "<<ui->tableWidget->item(row,col)->text();
+            QString updateString,columnName;
+            columnName = m_table.fields().at(col).name();
 
+            updateString = "UPDATE "+m_table.name()+" SET "+ columnName +" = "+newVal+" WHERE ";
+            for(QString primary : m_table.primaryKeys()){
+                int i=1;
+                if(i == 1){
+                    updateString += (primary + " = " +m_table.records().at(row).value(primary));
+                }else
+                    updateString += (" AND "+primary + " = " +m_table.records().at(row).value(primary));
+                i++;
+            }
+            updateString += ";";
+            // qDebug()<<updateString;
+            emit dataChanged(updateString);
         }
     });
 
@@ -64,31 +79,65 @@ void tableShow::setTable(xhytable table){
     // }
 }
 
-void tableShow::on_tableWidget_itemChanged(QTableWidgetItem *item)
-{
-    // qDebug()<<item->column();
-}
-
-
 void tableShow::on_addRecord_released()
 {
     ui->tableWidget->insertRow(ui->tableWidget->rowCount());
-    ui->addRecord->setEnabled(false);
-    ui->deleteRecord->setEnabled(false);
-    ui->comfirm->setEnabled(true);
-    ui->cancle->setEnabled(true);
+    resetButton(false);
 }
 
 
 void tableShow::on_deleteRecord_released()
 {
+    int row = ui->tableWidget->currentRow();
+    QString deleteString = "DELETE FROM "+m_table.name() +" WHERE ";
 
+    for(QString primary : m_table.primaryKeys()){
+        int i=1;
+        if(i == 1){
+        deleteString += (primary + " = " +m_table.records().at(row).value(primary));
+        }else
+            deleteString += (" AND "+primary + " = " +m_table.records().at(row).value(primary));
+        i++;
+    }
+    deleteString += ";";
+    ui->tableWidget->removeRow(row);
+    // qDebug()<<deleteString;
+    emit dataChanged(deleteString);
 }
 
 
 void tableShow::on_comfirm_released()
 {
+    QString insertString = "INSERT INTO "+m_table.name()+"(";
+    int i=1;
+    for(xhyfield field : m_table.fields()){
+        if(i == 1)
+            insertString += field.name();
+        else
+            insertString += ","+field.name();
+        i++;
+    }
+    insertString += ") VALUES (";
+    i=1;
+    for(int col=0; col<ui->tableWidget->columnCount(); ++col){
+        int row=ui->tableWidget->rowCount()-1;
 
+        QString val;
+        if(!ui->tableWidget->item(row,col)){
+            val = "NULL";
+        }
+        else val = ui->tableWidget->item(row,col)->text();
+        if(i == 1){
+            insertString += val;
+        }
+        else{
+            insertString += (","+ val);
+        }
+        i++;
+    }
+    insertString += ");";
+    // qDebug()<<insertString;
+    emit dataChanged(insertString);
 }
 
 
@@ -96,9 +145,12 @@ void tableShow::on_cancle_released()
 {
     ui->tableWidget->removeRow(ui->tableWidget->rowCount()-1);
 
-    ui->addRecord->setEnabled(true);
-    ui->deleteRecord->setEnabled(true);
-    ui->comfirm->setEnabled(false);
-    ui->cancle->setEnabled(false);
+    resetButton(true);
 }
 
+void tableShow::resetButton(bool yes){
+    ui->addRecord->setEnabled(yes);
+    ui->deleteRecord->setEnabled(yes);
+    ui->comfirm->setEnabled(!yes);
+    ui->cancle->setEnabled(!yes);
+}

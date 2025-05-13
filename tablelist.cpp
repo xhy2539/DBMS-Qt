@@ -31,7 +31,7 @@ void tableList::on_listWidget_itemDoubleClicked(QListWidgetItem *item)
     emit tableOpen(item->text());
 }
 
-void tableList::on_pushButton_released()
+void tableList::on_openTable_released()
 {
     emit tableOpen(current_itemName);
 }

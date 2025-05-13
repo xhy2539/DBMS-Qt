@@ -50,7 +50,7 @@
       <item>
        <widget class="QPushButton" name="linkButton">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
@@ -64,7 +64,7 @@
         <property name="maximumSize">
          <size>
           <width>70</width>
-          <height>70</height>
+          <height>80</height>
          </size>
         </property>
         <property name="text">
@@ -75,7 +75,7 @@
       <item>
        <widget class="QPushButton" name="addQuery">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
           <horstretch>50</horstretch>
           <verstretch>50</verstretch>
          </sizepolicy>
@@ -89,7 +89,7 @@
         <property name="maximumSize">
          <size>
           <width>70</width>
-          <height>70</height>
+          <height>80</height>
          </size>
         </property>
         <property name="text">
@@ -125,7 +125,7 @@
       <item>
        <widget class="QPushButton" name="tableButton">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
@@ -139,7 +139,7 @@
         <property name="maximumSize">
          <size>
           <width>70</width>
-          <height>70</height>
+          <height>80</height>
          </size>
         </property>
         <property name="text">
@@ -150,7 +150,7 @@
       <item>
        <widget class="QPushButton" name="viewButton">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
@@ -164,7 +164,7 @@
         <property name="maximumSize">
          <size>
           <width>70</width>
-          <height>70</height>
+          <height>80</height>
          </size>
         </property>
         <property name="text">
@@ -175,7 +175,7 @@
       <item>
        <widget class="QPushButton" name="functionButton">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
@@ -189,7 +189,7 @@
         <property name="maximumSize">
          <size>
           <width>70</width>
-          <height>70</height>
+          <height>80</height>
          </size>
         </property>
         <property name="text">
@@ -200,7 +200,7 @@
       <item>
        <widget class="QPushButton" name="queryButton">
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+         <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
           <horstretch>0</horstretch>
           <verstretch>0</verstretch>
          </sizepolicy>
@@ -214,7 +214,7 @@
         <property name="maximumSize">
          <size>
           <width>70</width>
-          <height>70</height>
+          <height>80</height>
          </size>
         </property>
         <property name="font">
@@ -320,7 +320,7 @@
      <x>0</x>
      <y>0</y>
      <width>892</width>
-     <height>24</height>
+     <height>17</height>
     </rect>
    </property>
   </widget>

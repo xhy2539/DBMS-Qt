@@ -2657,10 +2657,30 @@ void MainWindow::openTable(QString tableName){
             for(xhytable table : database.tables()){
                 if(table.name() == tableName){
 
-                    tableShow *tableshow = new tableShow(nullptr,current_GUI_Db);
+                    tableShow *tableshow = new tableShow(ui->tabWidget,current_GUI_Db);
                     ui->tabWidget->addTab(tableshow,tableName+" @"+current_GUI_Db);
                     ui->tabWidget->setCurrentWidget(tableshow);
                     tableshow->setTable(table);
+
+                    connect(tableshow,&tableShow::dataChanged,[=](const QString& sql ){
+                        db_manager.use_database( current_GUI_Db );
+                        // qDebug()<<sql;
+                        handleString(sql+"\n");
+                        // for(QString st: textBuffer){
+                        //     qDebug()<<"textBuffer:"<<st;
+                        // }
+                        QMessageBox msg;
+                        QString ass = textBuffer[textBuffer.count()-2];
+                        if(!ass.contains("1行以更新")) {
+                            msg.setWindowTitle("错误");
+                            msg.setText(ass);
+                            msg.setStandardButtons(QMessageBox::Ok);
+                            msg.exec();
+                        }else
+                            tableshow->resetButton(true);
+
+                        textBuffer.clear();
+                    });
                     return ;
                 }
             }
@@ -2668,12 +2688,10 @@ void MainWindow::openTable(QString tableName){
     }
 }
 
-void MainWindow::handleString(const QString& text, queryWidget* query){
-    current_query = query;
+void MainWindow::handleString(const QString& text){
+    qDebug()<<"handleString:"<<text;
     QString input = text;
     QStringList commands = SQLParser::parseMultiLineSQL(input); // SQLParser::静态调用
-
-    current_query->clear();
 
     for (const QString& command_const : commands) {
         QString trimmedCmd = command_const.trimmed();
@@ -2711,6 +2729,12 @@ void MainWindow::handleString(const QString& text, queryWidget* query){
             }
         }
     }
+}
+
+void MainWindow::handleString(const QString& text, queryWidget* query){
+    current_query = query;
+    current_query->clear();
+    handleString(text);
     for(const QString& msg : textBuffer ){
         query->appendPlainText(msg);
     }

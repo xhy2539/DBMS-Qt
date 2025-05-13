@@ -121,6 +121,7 @@ private:
     void handleItemDoubleClicked(QTreeWidgetItem *item, int column);
     void openTable(QString tableName);
     void handleString(const QString& text, queryWidget* querywidget);
+    void handleString(const QString& text);
     xhyfield::datatype parseDataTypeAndParams(
         const QString& type_str_input,
         QStringList& auto_generated_constraints,

@@ -1770,7 +1770,7 @@ xhyfield::datatype MainWindow::parseDataType(const QString& type_str_input, int*
     qWarning() << "未知的数据类型：" << actualType << " (来自: " << type_str_input << ")";
     return xhyfield::VARCHAR;
 }
-
+//修改大写问题
 QStringList MainWindow::parseConstraints(const QString& constraints_str_input) {
     QStringList constraints;
     if (constraints_str_input.isEmpty()) return constraints;

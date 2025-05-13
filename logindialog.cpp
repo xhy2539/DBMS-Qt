@@ -87,7 +87,7 @@ bool LoginDialog::validateUser(const QString &inputUser, const QString &inputPas
             return false;
         }
 
-        QString storedUser = QString::fromLatin1(username, strnlen(username, 50));
+        QString storedUser = QString::fromUtf8(username, strnlen(username, 50));
         if (storedUser == inputUser) {
             // 关键修改：使用 SHA-512 计算哈希
             QByteArray inputHash = QCryptographicHash::hash(

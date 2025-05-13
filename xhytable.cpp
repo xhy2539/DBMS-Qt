@@ -11,6 +11,59 @@
 #include <QJSEngine>
 #include <QRegularExpression>
 
+// zyh的where里的like
+// (此函数应位于 xhytable.cpp 文件中，或作为 xhytable 类的私有辅助方法)
+// 将 SQL LIKE 模式转换为正则表达式模式
+// likePattern: 用户输入的 LIKE 模式字符串，例如 "10\%%"
+// customEscapeChar:可选参数，如果您的解析器支持 ESCAPE 'char' 子句，则传入该字符。
+//                   如果为 QChar::Null，则默认使用 '\'。
+QString sqlLikeToRegex(const QString& likePattern, QChar customEscapeChar = QChar::Null) {
+    QString regexPattern;
+    regexPattern += '^'; // 锚定字符串的开始
+
+    // 确定实际使用的转义字符
+    const QChar escapeChar = (customEscapeChar == QChar::Null) ? QLatin1Char('\\') : customEscapeChar;
+    bool nextCharIsEscaped = false;
+
+    for (int i = 0; i < likePattern.length(); ++i) {
+        QChar c = likePattern[i];
+
+        if (nextCharIsEscaped) {
+            // 当前字符是前一个转义字符的目标，将其作为普通字符处理
+            regexPattern += QRegularExpression::escape(QString(c));
+            nextCharIsEscaped = false;
+        } else {
+            if (c == escapeChar) {
+                // 遇到了转义字符，标记下一个字符需要被转义
+                // 注意：如果转义字符是模式的最后一个字符，这种处理方式会将其忽略。
+                // SQL标准通常认为以转义符结尾的模式是错误的。
+                // 或者，您可以选择将末尾的转义符也视为普通字符。
+                // 为简单起见，这里我们假设它总是用于转义下一个字符。
+                if (i + 1 < likePattern.length()) {
+                    nextCharIsEscaped = true;
+                } else {
+                    // 模式以转义字符结尾，将其视为文字处理
+                    regexPattern += QRegularExpression::escape(QString(c));
+                }
+            } else if (c == QLatin1Char('%')) {
+                regexPattern += ".*"; // SQL '%' 对应正则表达式 '.*'
+            } else if (c == QLatin1Char('_')) {
+                regexPattern += ".";  // SQL '_' 对应正则表达式 '.'
+            } else {
+                // 其他字符按原样转义，以防它们是正则表达式的特殊字符
+                regexPattern += QRegularExpression::escape(QString(c));
+            }
+        }
+    }
+
+    // 如果模式以一个有效的转义序列结束，但nextCharIsEscaped仍为true（例如 LIKE 'abc\' ），
+    // 之前的逻辑会忽略最后一个字符。为确保正确性，可以添加一个检查，
+    // 但更标准的做法是在解析LIKE模式时就认为这种情况非法。
+    // 此处保持简单，依赖于 i+1 < length() 的检查。
+
+    regexPattern += '$'; // 锚定字符串的结束
+    return regexPattern;
+}
 
 namespace { // 使用匿名命名空间或设为类的静态私有方法
 bool parseDecimalParams(const QStringList& constraints, int& precision, int& scale) {
@@ -1779,16 +1832,23 @@ bool xhytable::matchConditions(const xhyrecord& record, const ConditionNode& con
         } else if (cd.operation.compare("BETWEEN", Qt::CaseInsensitive) == 0 || cd.operation.compare("NOT BETWEEN", Qt::CaseInsensitive) == 0) {
             bool isBetween = compareQVariants(actualValue, cd.value, ">=") && compareQVariants(actualValue, cd.value2, "<=");
             result = (cd.operation.compare("BETWEEN", Qt::CaseInsensitive) == 0) ? isBetween : !isBetween;
-        } else if (cd.operation.compare("LIKE", Qt::CaseInsensitive) == 0 || cd.operation.compare("NOT LIKE", Qt::CaseInsensitive) == 0) {
+        } // zyh修改了以下这一段like，然后就能在where里模式匹配了
+        else if (cd.operation.compare("LIKE", Qt::CaseInsensitive) == 0 || cd.operation.compare("NOT LIKE", Qt::CaseInsensitive) == 0) {
             QString actualString = actualValue.toString();
             // 确保 cd.value 是字符串或者可以无歧义地转为字符串模式
             if (cd.value.typeId() != QMetaType::QString && !cd.value.canConvert<QString>()) {
                 throw std::runtime_error("LIKE 操作符的模式必须是字符串或可转换为字符串。");
             }
-            QString patternStr = cd.value.toString();
-            qDebug() << "  LIKE check: actualString='" << actualString << "' patternStr='" << patternStr << "'";
-            QRegularExpression pattern(QRegularExpression::wildcardToRegularExpression(patternStr), QRegularExpression::CaseInsensitiveOption);
-            bool matches = pattern.match(actualString).hasMatch();
+            QString likePatternStr = cd.value.toString(); // 这是原始的 SQL LIKE 模式，例如 'a%' 或 '_r%'
+            qDebug() << "  LIKE check: actualString='" << actualString << "' likePatternStr='" << likePatternStr << "'";
+
+            // 使用新的辅助函数将 SQL LIKE 模式转换为正确的正则表达式模式
+            QString regexPatternStr = sqlLikeToRegex(likePatternStr);
+            qDebug() << "    Converted regex pattern: '" << regexPatternStr << "'";
+
+            QRegularExpression pattern(regexPatternStr, QRegularExpression::CaseInsensitiveOption);
+            bool matches = pattern.match(actualString).hasMatch(); // match() 会检查整个字符串是否匹配锚定的正则表达式
+
             result = (cd.operation.compare("LIKE", Qt::CaseInsensitive) == 0) ? matches : !matches;
         } else { // 其他二元比较操作符: =, !=, >, <, >=, <=
             result = compareQVariants(actualValue, cd.value, cd.operation);

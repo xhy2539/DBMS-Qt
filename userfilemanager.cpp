@@ -66,7 +66,7 @@ bool UserFileManager::loadUsers()
         }
 
         m_users.append(user);
-        m_userDatabases[QString::fromLatin1(user.username)] = dbs;
+        m_userDatabases[QString::fromUtf8(user.username, strnlen(user.username, 50))] = dbs;
     }
 
     file.close();
@@ -126,7 +126,7 @@ bool UserFileManager::addUser(const QString& username,
 
     // 检查用户是否存在
     for (const UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
             qWarning() << "User already exists:" << username;
             return false;
         }
@@ -146,7 +146,10 @@ bool UserFileManager::addUser(const QString& username,
         QCryptographicHash::Sha512
         );
     memcpy(newUser.password_hash, hashed.constData(), 64);
-
+    //调试使用
+    qDebug() << "UserFileManager::addUser - User added:" << username;
+    qDebug() << "UserFileManager::addUser - Generated Salt (hex):" << salt.toHex();
+    qDebug() << "UserFileManager::addUser - Stored Password Hash (hex):" << hashed.toHex();
     newUser.role = role;
     newUser.db_count = static_cast<uint16_t>(databases.size());
 
@@ -170,7 +173,7 @@ bool UserFileManager::addUser(const QString& username,
 bool UserFileManager::deleteUser(const QString& username)
 {
     for (int i = 0; i < m_users.size(); ++i) {
-        if (QString::fromLatin1(m_users[i].username) == username) {
+        if (QString::fromUtf8(m_users[i].username, strnlen(m_users[i].username, 50)) == username) {
             m_users.removeAt(i);
             m_userDatabases.remove(username);
             return saveUsers();
@@ -182,13 +185,20 @@ bool UserFileManager::deleteUser(const QString& username)
 bool UserFileManager::validateUser(const QString& username, const QString& password)
 {
     for (const UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
-            QByteArray salt(user.salt, 32);
-            QString hashed = hashPassword(password, salt);
-            return hashed.toUtf8() == QByteArray(user.password_hash, 64);
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
+            QByteArray salt(user.salt, 32); // 从 UserRecord 结构体中取出盐值
+
+            // 修正：直接使用 QByteArray 类型来存储哈希结果，避免 QString 转换导致的损坏
+            QByteArray hashedPasswordAttempt = hashPassword(password, salt);
+
+            // 从 UserRecord 结构体中取出存储的哈希值（确保它是 QByteArray 类型）
+            QByteArray storedHash(user.password_hash, 64); // 64字节的SHA-512哈希
+
+            // 直接比较两个 QByteArray
+            return hashedPasswordAttempt == storedHash;
         }
     }
-    return false;
+    return false; // 用户名未找到
 }
 
 uint8_t UserFileManager::getUserRole(const QString& username) const
@@ -204,7 +214,7 @@ uint8_t UserFileManager::getUserRole(const QString& username) const
     if (it != m_userDatabases.end()) {
         // 通过关联的m_users找到对应记录
         for (const UserRecord& user : m_users) {
-            if (QString::fromLatin1(user.username) == username) {
+            if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
                 return (user.role <= 2) ? user.role : 0; // 确保角色值有效
             }
         }
@@ -222,7 +232,7 @@ bool UserFileManager::setUserRole(const QString& username, uint8_t newRole)
     }
 
     for (UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
             user.role = newRole;
             return saveUsers();
         }
@@ -246,7 +256,7 @@ QVector<UserDatabaseInfo> UserFileManager::getUserDatabaseInfo(const QString& us
     // 转换为更友好的结构
     for (const DatabasePermission& db : dbs) {
         UserDatabaseInfo info;
-        info.dbName = QString::fromLatin1(db.db_name);
+        info.dbName = QString::fromUtf8(db.db_name, strnlen(db.db_name, 50));
         info.permissions = db.permissions;
         result.append(info);
     }
@@ -257,11 +267,11 @@ QVector<UserDatabaseInfo> UserFileManager::getUserDatabaseInfo(const QString& us
 bool UserFileManager::addDatabaseToUser(const QString& username, const QString& dbName, uint8_t permissions)
 {
     for (UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
             // 检查是否已存在
             auto& dbs = m_userDatabases[username];
             for (const DatabasePermission& db : dbs) {
-                if (QString::fromLatin1(db.db_name) == dbName) {
+                if (QString::fromUtf8(db.db_name, strnlen(db.db_name, 50)) == dbName) {
                     return false; // 已存在
                 }
             }
@@ -283,10 +293,10 @@ bool UserFileManager::addDatabaseToUser(const QString& username, const QString& 
 bool UserFileManager::removeDatabaseFromUser(const QString& username, const QString& dbName)
 {
     for (UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
             auto& dbs = m_userDatabases[username];
             for (int i = 0; i < dbs.size(); ++i) {
-                if (QString::fromLatin1(dbs[i].db_name) == dbName) {
+                if (QString::fromUtf8(dbs[i].db_name, strnlen(dbs[i].db_name, 50)) == dbName) {
                     dbs.removeAt(i);
                     user.db_count = dbs.size();
                     return saveUsers();
@@ -301,10 +311,10 @@ bool UserFileManager::removeDatabaseFromUser(const QString& username, const QStr
 bool UserFileManager::updateDatabasePermissions(const QString& username, const QString& dbName, uint8_t newPermissions)
 {
     for (UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
             auto& dbs = m_userDatabases[username];
             for (DatabasePermission& db : dbs) {
-                if (QString::fromLatin1(db.db_name) == dbName) {
+                if (QString::fromUtf8(db.db_name, strnlen(db.db_name, 50)) == dbName) {
                     db.permissions = newPermissions;
                     return saveUsers();
                 }
@@ -318,7 +328,7 @@ bool UserFileManager::updateDatabasePermissions(const QString& username, const Q
 bool UserFileManager::removeAllDatabasesFromUser(const QString& username) {
     // 1. 查找用户
     for (UserRecord& user : m_users) {
-        if (QString::fromLatin1(user.username) == username) {
+        if (QString::fromUtf8(user.username, strnlen(user.username, 50)) == username) {
 
             // 2. 检查是否已有数据库权限
             if (user.db_count == 0) {
@@ -378,7 +388,7 @@ bool UserFileManager::initialize()
         // 创建默认管理员账户
         UserRecord root;
         memset(&root, 0, sizeof(root));
-        strncpy(root.username, "admin", 49);
+        strncpy(root.username, "root", 49);
 
         QByteArray salt = generateSalt();
         memcpy(root.salt, salt.constData(), 32);
@@ -389,6 +399,10 @@ bool UserFileManager::initialize()
             QCryptographicHash::Sha512
             );
         memcpy(root.password_hash, hashed.constData(), 64); // 正确复制64字节二进制数据
+        // 在 UserFileManager::initialize 中，在 memcpy(root.password_hash, ...) 之后
+        qDebug() << "UserFileManager::initialize - root user initialized.";
+        qDebug() << "UserFileManager::initialize - Salt (hex):" << QByteArray(root.salt, 32).toHex();
+        qDebug() << "UserFileManager::initialize - Password Hash (hex):" << QByteArray(root.password_hash, 64).toHex();
 
         root.role = 2; // 管理员
         root.db_count = 0;
@@ -402,7 +416,7 @@ bool UserFileManager::initialize()
         file.close();
 
         m_users.append(root);
-        m_userDatabases["admin"] = QVector<DatabasePermission>();
+        m_userDatabases["root"] = QVector<DatabasePermission>();
     } else {
         return loadUsers();
     }

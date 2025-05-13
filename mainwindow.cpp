@@ -6,6 +6,7 @@
 #include "xhydatabase.h"
 #include "xhyindex.h"
 #include "ConditionNode.h" // 确保这个 include 存在
+#include "createuserdialog.h" // <-- 如果要打开注册用户对话框，需要包含此头文件
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QDebug>
@@ -19,6 +20,11 @@
 #include <stdexcept> // 包含 stdexcept
 #include <limits>    // 用于 std::numeric_limits
 #include <QRegularExpressionMatchIterator>
+#include <QMenu>          // <-- 添加这一行
+#include <QMenuBar>       // <-- 添加这一行
+#include <QAction>        // <-- 添加这一行
+
+
 
 MainWindow::MainWindow(const QString &name,QWidget *parent)
     : QMainWindow(parent)
@@ -32,6 +38,36 @@ MainWindow::MainWindow(const QString &name,QWidget *parent)
         qWarning() << "警告：用户数据加载/初始化失败。";
     }
     db_manager.load_databases_from_files();
+
+    //菜单栏（注册账号）
+
+    // 获取或创建主窗口的菜单栏
+    QMenuBar *menuBar = this->menuBar(); // QMainWindow::menuBar() 会返回菜单栏指针，如果没有则会自动创建
+
+    // 1. 添加“帮助”菜单及其子项
+    QMenu *helpMenu = menuBar->addMenu("帮助(&H)"); // "&H" 是快捷键提示，按Alt+H可以快速打开
+    QAction *aboutAction = new QAction("相关(&A)...", this); // <-- 修正后的代码
+    helpMenu->addAction(aboutAction);
+
+    // 连接“相关”菜单项的触发信号到显示“关于”对话框的槽函数
+    connect(aboutAction, &QAction::triggered, this, [this](){
+        QMessageBox::about(this, "关于 Mini DBMS", "Mini DBMS 是一个迷你数据库管理系统。\n\n版本: 1.0\。");
+    });
+
+    // 2. 添加“账户”菜单及其子项
+    QMenu *accountMenu = menuBar->addMenu("账户(&C)"); // "&C" 是快捷键提示
+    QAction *registerAccountAction = new QAction("注册账户(&R)...", this); // <-- 修正后的代码
+    accountMenu->addAction(registerAccountAction);
+
+    if (Account.getUserRole(username) < 2) { // 只有权限等于2（管理员）的用户才能看到“注册账户”
+        registerAccountAction->setVisible(false); // 隐藏该菜单项
+    }
+
+    // 连接“注册账户”菜单项的触发信号到打开注册用户对话框的槽函数
+    connect(registerAccountAction, &QAction::triggered, this, &MainWindow::openRegisterUserDialog);
+
+    // ====================== 结束添加菜单栏代码 ======================
+
 
     //GUI
     ui->linkButton->setEnabled(false);
@@ -991,6 +1027,28 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         node.children.append(childNode);
         // qDebug() << "  Created NEGATION_OP node with child type:" << childNode.type;
         return node;
+    }
+
+    // zyh在这里加了这样一段，然后就可以处理BETWEEN ... AND ...语句了
+    if (expression.contains("BETWEEN", Qt::CaseInsensitive)) {
+        // 解析 BETWEEN ... AND ...
+        QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatch match = betweenRegex.match(expression);
+
+        if (match.hasMatch()) {
+            QString field = match.captured(1).trimmed();
+            QString value1 = match.captured(2).trimmed();
+            QString value2 = match.captured(3).trimmed();
+
+            node.type = ConditionNode::COMPARISON_OP;
+            node.comparison.fieldName = field;
+            node.comparison.operation = "BETWEEN";
+            node.comparison.value = parseLiteralValue(value1);
+            node.comparison.value2 = parseLiteralValue(value2);
+
+            qDebug() << "Parsed BETWEEN: Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
+            return node;
+        }
     }
 
     // 3. 处理逻辑运算符 OR, AND ... (这部分代码与您之前提供的版本相同，保持不变)
@@ -2408,6 +2466,12 @@ void MainWindow::on_tabWidget_tabCloseRequested(int index)
     QWidget* widget = ui->tabWidget->widget(index);
     ui->tabWidget->removeTab(index);
     widget->deleteLater();
+}
+
+void MainWindow::openRegisterUserDialog()
+{
+    CreateUserDialog createUserDialog(&Account,&db_manager,this); // 创建注册用户对话框实例
+    createUserDialog.exec();
 }
 
 

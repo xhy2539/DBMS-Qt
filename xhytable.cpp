@@ -8,6 +8,63 @@
 #include <QRegularExpression>
 #include "xhydatabase.h"
 #include <stdexcept> // 用于 std::runtime_error
+#include <QJSEngine>
+#include <QRegularExpression>
+
+// zyh的where里的like
+// (此函数应位于 xhytable.cpp 文件中，或作为 xhytable 类的私有辅助方法)
+// 将 SQL LIKE 模式转换为正则表达式模式
+// likePattern: 用户输入的 LIKE 模式字符串，例如 "10\%%"
+// customEscapeChar:可选参数，如果您的解析器支持 ESCAPE 'char' 子句，则传入该字符。
+//                   如果为 QChar::Null，则默认使用 '\'。
+QString sqlLikeToRegex(const QString& likePattern, QChar customEscapeChar = QChar::Null) {
+    QString regexPattern;
+    regexPattern += '^'; // 锚定字符串的开始
+
+    // 确定实际使用的转义字符
+    const QChar escapeChar = (customEscapeChar == QChar::Null) ? QLatin1Char('\\') : customEscapeChar;
+    bool nextCharIsEscaped = false;
+
+    for (int i = 0; i < likePattern.length(); ++i) {
+        QChar c = likePattern[i];
+
+        if (nextCharIsEscaped) {
+            // 当前字符是前一个转义字符的目标，将其作为普通字符处理
+            regexPattern += QRegularExpression::escape(QString(c));
+            nextCharIsEscaped = false;
+        } else {
+            if (c == escapeChar) {
+                // 遇到了转义字符，标记下一个字符需要被转义
+                // 注意：如果转义字符是模式的最后一个字符，这种处理方式会将其忽略。
+                // SQL标准通常认为以转义符结尾的模式是错误的。
+                // 或者，您可以选择将末尾的转义符也视为普通字符。
+                // 为简单起见，这里我们假设它总是用于转义下一个字符。
+                if (i + 1 < likePattern.length()) {
+                    nextCharIsEscaped = true;
+                } else {
+                    // 模式以转义字符结尾，将其视为文字处理
+                    regexPattern += QRegularExpression::escape(QString(c));
+                }
+            } else if (c == QLatin1Char('%')) {
+                regexPattern += ".*"; // SQL '%' 对应正则表达式 '.*'
+            } else if (c == QLatin1Char('_')) {
+                regexPattern += ".";  // SQL '_' 对应正则表达式 '.'
+            } else {
+                // 其他字符按原样转义，以防它们是正则表达式的特殊字符
+                regexPattern += QRegularExpression::escape(QString(c));
+            }
+        }
+    }
+
+    // 如果模式以一个有效的转义序列结束，但nextCharIsEscaped仍为true（例如 LIKE 'abc\' ），
+    // 之前的逻辑会忽略最后一个字符。为确保正确性，可以添加一个检查，
+    // 但更标准的做法是在解析LIKE模式时就认为这种情况非法。
+    // 此处保持简单，依赖于 i+1 < length() 的检查。
+
+    regexPattern += '$'; // 锚定字符串的结束
+    return regexPattern;
+}
+
 namespace { // 使用匿名命名空间或设为类的静态私有方法
 bool parseDecimalParams(const QStringList& constraints, int& precision, int& scale) {
     bool p_found = false;
@@ -214,9 +271,167 @@ bool xhytable::checkForeignKeyDeleteRestrictions(const xhyrecord& recordToDelete
     qDebug() << "[FK Check ON DELETE] Table" << m_name << ": No restrictions found for record:" << recordToDelete.allValues();
     return true;
 }
+
+
+QVariant xhytable::convertStringToType(const QString& str, xhyfield::datatype type) const {
+    switch (type) {
+    // 整数类型
+    case xhyfield::TINYINT:
+    case xhyfield::SMALLINT:
+    case xhyfield::INT:
+        return str.toInt();
+    case xhyfield::BIGINT:
+        return str.toLongLong();
+
+    // 浮点类型
+    case xhyfield::FLOAT:
+        return str.toFloat();
+    case xhyfield::DOUBLE:
+    case xhyfield::DECIMAL:
+        return str.toDouble();
+
+    // 字符串类型（直接返回）
+    case xhyfield::CHAR:
+    case xhyfield::VARCHAR:
+    case xhyfield::TEXT:
+    case xhyfield::ENUM:
+        return str;
+
+    // 布尔类型
+    case xhyfield::BOOL:
+        return (str.toLower() == "true" || str == "1");
+
+    // 日期时间类型
+    case xhyfield::DATE:
+        return QDate::fromString(str, Qt::ISODate);
+    case xhyfield::DATETIME:
+    case xhyfield::TIMESTAMP:
+        return QDateTime::fromString(str, Qt::ISODate);
+
+    // 默认返回字符串
+    default:
+        return str;
+    }
+}
+
+//解析check语句
+bool xhytable::evaluateCheckExpression(const QString& expr, const QVariantMap& fieldValues) const {
+    QJSEngine engine;
+
+    // 1. 安全防护：禁止危险JS代码
+    if (expr.contains("function") || expr.contains("eval") || expr.contains("script")) {
+        qWarning() << "拒绝执行可能危险的CHECK表达式:" << expr;
+        return false;
+    }
+
+    // 2. 注入字段值到JS引擎（增强类型处理）
+    for (auto it = fieldValues.begin(); it != fieldValues.end(); ++it) {
+        const QString& fieldName = it.key();
+        const QVariant& value = it.value();
+
+        // 处理NULL值
+        if (value.isNull()) {
+            engine.globalObject().setProperty(fieldName, QJSValue(QJSValue::NullValue));
+            continue;
+        }
+
+        switch (value.type()) {
+        case QVariant::Int:
+        case QVariant::Double:
+            engine.globalObject().setProperty(fieldName, value.toDouble());
+            break;
+        case QVariant::Bool:
+            engine.globalObject().setProperty(fieldName, value.toBool());
+            break;
+        default:
+            engine.globalObject().setProperty(fieldName, value.toString());
+        }
+    }
+
+    // 3. 完整SQL→JS语法转换
+    QString jsExpr = expr;
+
+    // 处理关键字大小写
+    jsExpr.replace(QRegularExpression("\\bAND\\b", QRegularExpression::CaseInsensitiveOption), "&&")
+        .replace(QRegularExpression("\\bOR\\b", QRegularExpression::CaseInsensitiveOption), "||")
+        .replace(QRegularExpression("\\bNOT\\b", QRegularExpression::CaseInsensitiveOption), "!");
+
+    // 处理特殊比较运算符
+    jsExpr.replace("!=", "!==")
+        .replace("==", "===")
+        .replace("<>", "!==");
+
+    // 处理LIKE（增强通配符支持）
+    QRegularExpression likeRe(R"(([\w.]+)\s+LIKE\s+'((?:[^']|'')*)')", QRegularExpression::CaseInsensitiveOption);
+    int pos = 0;
+    while ((pos = jsExpr.indexOf(likeRe, pos)) != -1) {
+        QRegularExpressionMatch match = likeRe.match(jsExpr, pos);
+        QString field = match.captured(1);
+        QString pattern = match.captured(2)
+                              .replace("''", "'")  // 处理SQL转义的单引号
+                              .replace("%", ".*")
+                              .replace("_", ".")
+                              .replace("\\", "\\\\");  // 处理转义字符
+
+        QString replacement = QString("/^%1$/i.test(%2)").arg(pattern, field);
+        jsExpr.replace(match.capturedStart(), match.capturedLength(), replacement);
+        pos += replacement.length();
+    }
+
+    // 处理IN列表（增强字符串支持）
+    QRegularExpression inRe(R"(([\w.]+)\s+IN\s*\(((?:'[^']*'(?:\s*,\s*)?)+)\))", QRegularExpression::CaseInsensitiveOption);
+    pos = 0;
+    while ((pos = jsExpr.indexOf(inRe, pos)) != -1) {
+        QRegularExpressionMatch match = inRe.match(jsExpr, pos);
+        QString field = match.captured(1);
+        QStringList values;
+
+        // 解析IN列表中的每个值
+        QRegularExpression valueRe(R"('((?:[^']|'')*)')");
+        int valuePos = 0;
+        while ((valuePos = match.captured(2).indexOf(valueRe, valuePos)) != -1) {
+            QRegularExpressionMatch valueMatch = valueRe.match(match.captured(2), valuePos);
+            values << "'" + valueMatch.captured(1).replace("''", "'") + "'";
+            valuePos += valueMatch.capturedLength();
+        }
+
+        QString replacement = QString("[%1].includes(%2)").arg(values.join(","), field);
+        jsExpr.replace(match.capturedStart(), match.capturedLength(), replacement);
+        pos += replacement.length();
+    }
+
+    // 4. 执行表达式（添加错误防护）
+    QJSValue result = engine.evaluate("(function() { try { return !!(" + jsExpr + "); } catch(e) { return false; } })()");
+
+    if (result.isError()) {
+        qWarning() << "CHECK约束执行错误:" << result.toString()
+            << "\n原始表达式:" << expr
+            << "\n转换后JS:" << jsExpr;
+        return false;
+    }
+
+    return result.toBool();
+}
+
+
+
 bool xhytable::checkInsertConstraints(const QMap<QString, QString>& fieldValues) const {
+    // 验证 CHECK 约束
+    QVariantMap fullRecordData;
+    for (const QString& key : fieldValues.keys()) {
+        fullRecordData[key] = convertStringToType(fieldValues[key],getFieldType(key));
+    }
+    for (const QString& checkExpr : m_checkConstraints.values()) {
+        if (!evaluateCheckExpression(checkExpr, fullRecordData)) {
+            qWarning() << "插入失败: 违反表级CHECK约束:" << checkExpr;
+            return false;
+        }
+    }
+
+    return true;
+    //暂时不用-----------
     // 验证主键唯一性
-    if (!m_primaryKeys.isEmpty()) {
+    /*if (!m_primaryKeys.isEmpty()) {
         for (const auto& record : m_records) {
             bool conflict = true;
             for (const auto& pk : m_primaryKeys) {
@@ -263,9 +478,7 @@ bool xhytable::checkInsertConstraints(const QMap<QString, QString>& fieldValues)
                 return false; // 唯一性冲突
             }
         }
-    }
-
-    return true; // 所有约束通过
+    }*/
 }
 // 检查更新操作时是否违反约束
 bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const {
@@ -322,11 +535,40 @@ bool xhytable::checkUpdateConstraints(const QMap<QString, QString>& updates, con
                     }
                 }
             }
+            // 验证 CHECK 约束
+            for (const auto& checkConstraint : m_checkConstraints.keys()) {
+                const QString& checkExpr = m_checkConstraints[checkConstraint];
+
+                // 构建字段值映射(QVariantMap)
+                QVariantMap fieldValues;
+
+                // 获取记录的所有值
+                QMap<QString, QString> recordValues = record.allValues();
+
+                // 合并原记录值和更新值
+                for (const QString& field : recordValues.keys()) {
+                    if (updates.contains(field)) {
+                        fieldValues[field] = convertStringToType(updates[field],getFieldType(field)); // 使用更新值
+                    } else {
+                        fieldValues[field] = convertStringToType(recordValues[field],getFieldType(field)); // 使用原记录值
+                    }
+                }
+
+                // 执行CHECK约束检查
+                if (!evaluateCheckExpression(checkExpr, fieldValues)) {
+                    qWarning() << "更新失败: CHECK约束违反 -" << checkExpr;
+                    throw std::runtime_error("更新失败: CHECK约束违反 - " + checkExpr.toStdString());
+                    return false;
+                }
+            }
         }
     }
 
     return true; // 所有约束通过
 }
+
+
+
 
 
 
@@ -403,13 +645,53 @@ bool xhytable::createtable(const xhytable& table) {
 }
 
 void xhytable::add_primary_key(const QStringList& keys) {
+    if (keys.isEmpty()) {
+        qWarning() << "[add_primary_key] 表 '" << m_name << "'：尝试添加空的主键列表。";
+        // 也可以考虑抛出异常
+        // throw std::runtime_error("主键列表不能为空。");
+        return;
+    }
+
     for (const QString& key : keys) {
-        if (has_field(key) && !m_primaryKeys.contains(key, Qt::CaseInsensitive)) {
-            m_primaryKeys.append(key);
-        } else if (!has_field(key)) {
-            qWarning() << "添加主键失败：字段 " << key << " 不存在于表 " << m_name;
+        // 1. 检查字段是否存在于表中
+        const xhyfield* field_ptr = get_field(key); // 使用 get_field 进行大小写不敏感查找
+        if (field_ptr) {
+            // 使用从 get_field 获取的、大小写正确的字段名
+            const QString& actualFieldName = field_ptr->name();
+
+            // 2. 添加到 m_primaryKeys 列表 (如果尚不存在)
+            //    注意：m_primaryKeys 的比较也应该大小写不敏感，或者存储规范化的大小写形式。
+            //    假设 contains 和 append 已处理大小写或您已规范化。
+            //    为了安全，我们使用 get_field 返回的实际字段名。
+            bool foundInPrimaryKeys = false;
+            for (const QString& pk : m_primaryKeys) {
+                if (pk.compare(actualFieldName, Qt::CaseInsensitive) == 0) {
+                    foundInPrimaryKeys = true;
+                    break;
+                }
+            }
+            if (!foundInPrimaryKeys) {
+                m_primaryKeys.append(actualFieldName);
+            }
+
+            // 3. **【核心修改】将主键的组成列添加到 m_notNullFields 集合**
+            //    确保字段名的大小写与 m_notNullFields 中存储的名称一致。
+            //    m_notNullFields 在 addfield 中使用 field.name() 插入。
+            if (!m_notNullFields.contains(actualFieldName)) { // 避免重复插入和日志输出
+                m_notNullFields.insert(actualFieldName);
+                qDebug() << "[add_primary_key] 表 '" << m_name << "'：将主键字段 '" << actualFieldName << "' 隐式标记为 NOT NULL。";
+            }
+        } else {
+            // 如果主键中指定的字段在表中不存在
+            qWarning() << "[add_primary_key] 添加主键失败：字段 '" << key << "' 在表 '" << m_name << "' 中不存在。";
+            // 在生产环境中，这里应该抛出异常，以中断 CREATE TABLE 操作
+            // throw std::runtime_error(("添加主键失败：主键中指定的字段 '" + key + "' 不存在于表 '" + m_name + "'。").toStdString());
+            // 如果不抛出异常，至少要确保操作的原子性，可能需要回滚部分表定义。
+            // 为了简单起见，这里仅输出警告。但这意味着可能创建出一个无效的表定义。
         }
     }
+    qDebug() << "[add_primary_key] 表 '" << m_name << "' 的主键列更新为：" << m_primaryKeys;
+    qDebug() << "[add_primary_key] 表 '" << m_name << "' 的非空字段集合更新为：" << m_notNullFields;
 }
 void xhytable::add_foreign_key(const QStringList& childColumns,
                                const QString& referencedTable,
@@ -523,8 +805,10 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
             if (m_defaultValues.contains(fieldName)) {
                 valuesToValidateAndInsert[fieldName] = m_defaultValues.value(fieldName);
             } else if (!m_notNullFields.contains(fieldName)) {
+
                 // Field is nullable, no default, and user used DEFAULT keyword -> insert SQL NULL
                 valuesToValidateAndInsert[fieldName] = QString();
+
             } else {
                 // NOT NULL field, no default, but user used DEFAULT keyword -> illegal
                 QString errMessage = QStringLiteral("字段 '%1' (NOT NULL) 无默认值，无法使用 DEFAULT 关键字。").arg(fieldName);
@@ -532,6 +816,7 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
                 throw std::runtime_error(errMessage.toStdString());
             }
         }
+
         // Scenario B: User did NOT provide a value for this field (it's missing from fieldValuesFromUser)
         else if (!valuesToValidateAndInsert.contains(fieldName)) {
             if (m_defaultValues.contains(fieldName)) {
@@ -542,6 +827,7 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
                 // if it's missing, its effective value for validation will be SQL NULL.
                 // `validateRecord` will then handle the NOT NULL violation if applicable.
                 valuesToValidateAndInsert[fieldName] = QString(); // Explicitly set to SQL NULL (QString())
+
             }
         }
         // Scenario C: User provided an explicit value (already in valuesToValidateAndInsert), no action needed here.
@@ -573,10 +859,11 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
         return false;
     }
 }
-
-
-
 int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions, const ConditionNode & conditions) {
+    if(!checkUpdateConstraints(updates_with_expressions,conditions)){
+        return 0;
+    }
+
     int affectedRows = 0;
     QList<xhyrecord>* targetRecordsList = m_inTransaction ? &m_tempRecords : &m_records;
 
@@ -787,7 +1074,10 @@ void xhytable::validateRecord(const QMap<QString, QString>& values, const xhyrec
              << (original_record_for_update ? "(UPDATE operation)" : "(INSERT operation)");
 
     const QList<xhyrecord>& recordsToCheck = m_inTransaction ? m_tempRecords : m_records;
-
+    //check约束检查
+    if(!checkInsertConstraints(values)){
+        throw std::runtime_error("check出错");
+    }
     // 1. 字段级约束检查 (NOT NULL, Type, CHECK, ENUM)
     for (const xhyfield& fieldDef : m_fields) {
         const QString& fieldName = fieldDef.name();
@@ -1561,16 +1851,23 @@ bool xhytable::matchConditions(const xhyrecord& record, const ConditionNode& con
         } else if (cd.operation.compare("BETWEEN", Qt::CaseInsensitive) == 0 || cd.operation.compare("NOT BETWEEN", Qt::CaseInsensitive) == 0) {
             bool isBetween = compareQVariants(actualValue, cd.value, ">=") && compareQVariants(actualValue, cd.value2, "<=");
             result = (cd.operation.compare("BETWEEN", Qt::CaseInsensitive) == 0) ? isBetween : !isBetween;
-        } else if (cd.operation.compare("LIKE", Qt::CaseInsensitive) == 0 || cd.operation.compare("NOT LIKE", Qt::CaseInsensitive) == 0) {
+        } // zyh修改了以下这一段like，然后就能在where里模式匹配了
+        else if (cd.operation.compare("LIKE", Qt::CaseInsensitive) == 0 || cd.operation.compare("NOT LIKE", Qt::CaseInsensitive) == 0) {
             QString actualString = actualValue.toString();
             // 确保 cd.value 是字符串或者可以无歧义地转为字符串模式
             if (cd.value.typeId() != QMetaType::QString && !cd.value.canConvert<QString>()) {
                 throw std::runtime_error("LIKE 操作符的模式必须是字符串或可转换为字符串。");
             }
-            QString patternStr = cd.value.toString();
-            qDebug() << "  LIKE check: actualString='" << actualString << "' patternStr='" << patternStr << "'";
-            QRegularExpression pattern(QRegularExpression::wildcardToRegularExpression(patternStr), QRegularExpression::CaseInsensitiveOption);
-            bool matches = pattern.match(actualString).hasMatch();
+            QString likePatternStr = cd.value.toString(); // 这是原始的 SQL LIKE 模式，例如 'a%' 或 '_r%'
+            qDebug() << "  LIKE check: actualString='" << actualString << "' likePatternStr='" << likePatternStr << "'";
+
+            // 使用新的辅助函数将 SQL LIKE 模式转换为正确的正则表达式模式
+            QString regexPatternStr = sqlLikeToRegex(likePatternStr);
+            qDebug() << "    Converted regex pattern: '" << regexPatternStr << "'";
+
+            QRegularExpression pattern(regexPatternStr, QRegularExpression::CaseInsensitiveOption);
+            bool matches = pattern.match(actualString).hasMatch(); // match() 会检查整个字符串是否匹配锚定的正则表达式
+
             result = (cd.operation.compare("LIKE", Qt::CaseInsensitive) == 0) ? matches : !matches;
         } else { // 其他二元比较操作符: =, !=, >, <, >=, <=
             result = compareQVariants(actualValue, cd.value, cd.operation);
@@ -1583,3 +1880,4 @@ bool xhytable::matchConditions(const xhyrecord& record, const ConditionNode& con
     }
     return result;
 }
+

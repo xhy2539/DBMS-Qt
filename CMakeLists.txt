@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(DBMS VERSION 0.1 LANGUAGES CXX)
 
+
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -11,6 +12,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Qml)  # 添加 Qml
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Qml)  # 添加 Qml
 
 set(PROJECT_SOURCES
         main.cpp
@@ -41,6 +44,7 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         querylist.h querylist.cpp querylist.ui
         tableshow.h tableshow.cpp tableshow.ui
         tabledesign.h tabledesign.cpp tabledesign.ui
+        createuserdialog.h createuserdialog.cpp createuserdialog.ui
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET DBMS APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -61,6 +65,7 @@ else()
 endif()
 
 target_link_libraries(DBMS PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
+target_link_libraries(DBMS PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Qml)  # 添加 Qt::Qml
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an

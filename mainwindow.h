@@ -133,5 +133,12 @@ private:
         int& s_val,
         bool& s_specified
         );
+
+    // 由zyh新增，用于聚组函数
+    QVariant calculateAggregate(const QString& function, const QString& column, const QVector<xhyrecord>& records);
+    bool isNumeric(const QString& str) const;
+
+    // 由zyh新增，用于解决函数里无法使用表别名的情况
+    QString removeTableAlias(const QString& col, const QString& table_alias, const QString& table_name);
 };
 #endif // MAINWINDOW_H

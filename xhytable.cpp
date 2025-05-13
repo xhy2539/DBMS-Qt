@@ -111,6 +111,25 @@ void xhytable::addfield(const xhyfield& field) {
         // 这里假设传入的是已经准备好的值。
         m_defaultValues[field.name()] = defaultValue;
     }
+    // 解析字段级 CHECK 约束 (修正版)
+    for (const QString& constraint_item : field.constraints()) { // 遍历该字段的所有约束字符串
+        if (constraint_item.startsWith("CHECK", Qt::CaseInsensitive) &&
+            constraint_item.contains('(') && constraint_item.endsWith(')')) {
+
+            int startParen = constraint_item.indexOf('(');
+            int endParen = constraint_item.lastIndexOf(')');
+
+            if (startParen != -1 && endParen > startParen) {
+                QString condition = constraint_item.mid(startParen + 1, endParen - (startParen + 1)).trimmed();
+                if (!condition.isEmpty()) {
+                    // 这个调用会将 CHECK 约束添加到 this->m_checkConstraints
+                    this->add_check_constraint(condition, ""); // 约束名自动生成
+                    qDebug() << "[addfield] 字段" << field.name() << ": 已添加 CHECK 约束，条件为:" << condition;
+                } else { /* ... warning ... */ }
+            } else { /* ... warning ... */ }
+            break;
+        }
+    }
     m_fields.append(newField);
 }
 

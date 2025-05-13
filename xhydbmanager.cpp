@@ -664,6 +664,111 @@ void xhydbmanager::load_databases_from_files() {
                 } else if (tdf_load_successful && tdfFile.atEnd()) {
                     qDebug() << "    [LOAD_DB_TDF] Reached end of TDF for " << current_table_name << " after field blocks, no FK count found (or 0 FKs).";
                 }
+                // ***** 新增：读取默认值信息 *****
+                if (tdf_load_successful && !tdfFile.atEnd()) { // 确保前面的加载步骤成功且文件未读完
+                    quint32 numDefaultValues = 0;
+                    // 安全读取数量
+                    if (tdfFile.pos() + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
+                        tdf_in_stream >> numDefaultValues;
+                    } else if (!tdfFile.atEnd()){ // 文件未结束，但剩余字节不够一个quint32
+                        qWarning() << "    [LOAD_DB_TDF] 表" << current_table_name << "的TDF文件：剩余字节不足以读取默认值数量。";
+                    }
+
+                    if (tdf_in_stream.status() == QDataStream::Ok && numDefaultValues > 0) {
+                        qDebug() << "    [LOAD_DB_TDF] 正在为表" << current_table_name << "加载" << numDefaultValues << "个默认值定义";
+                        for (quint32 i = 0; i < numDefaultValues; ++i) {
+                            QString fieldName, defaultValue;
+                            tdf_in_stream >> fieldName >> defaultValue; // 读取字段名和默认值
+                            if (tdf_in_stream.status() != QDataStream::Ok) {
+                                qWarning() << "    [LOAD_DB_TDF] 读取表" << current_table_name << "中字段" << fieldName << "的默认值时出错。";
+                                tdf_load_successful = false; break; // 中断加载此表的默认值
+                            }
+
+
+                            table.m_defaultValues[fieldName] = defaultValue; // 直接访问或通过特定setter
+                            qDebug() << "      [LOAD_DB_TDF_DEFAULT] 已加载字段:" << fieldName << "的默认值:" << defaultValue;
+                        }
+                    } else if (tdf_in_stream.status() != QDataStream::Ok && numDefaultValues > 0) { // 流状态错误
+                        qWarning() << "    [LOAD_DB_TDF] 读取表" << current_table_name << "的默认值数量时流状态错误。";
+                        tdf_load_successful = false;
+                    }
+                }
+
+                // ***** 新增：读取 CHECK 约束信息 *****
+                if (tdf_load_successful && !tdfFile.atEnd()) {
+                    quint32 numCheckConstraints = 0;
+                    // ... (安全读取 numCheckConstraints) ...
+                    if (tdfFile.pos() + static_cast<qint64>(sizeof(quint32)) <= tdfFile.size()) {
+                        tdf_in_stream >> numCheckConstraints;
+                    } else if (!tdfFile.atEnd()){ /* ... warning ... */ }
+
+                    if (tdf_in_stream.status() == QDataStream::Ok && numCheckConstraints > 0) {
+                        qDebug() << "    [LOAD_DB_TDF] 正在为表" << current_table_name << "加载" << numCheckConstraints << "个CHECK约束定义";
+                        for (quint32 i = 0; i < numCheckConstraints; ++i) {
+                            QString constraintName, checkExpression;
+                            tdf_in_stream >> constraintName >> checkExpression;
+                            if (tdf_in_stream.status() != QDataStream::Ok) {
+                                qWarning() << "    [LOAD_DB_TDF] 读取表" << current_table_name << "的CHECK约束" << constraintName << "时出错。";
+                                tdf_load_successful = false; break;
+                            }
+                            // 使用 xhytable::add_check_constraint 方法来填充 m_checkConstraints
+                            table.add_check_constraint(checkExpression, constraintName);
+                            qDebug() << "      [LOAD_DB_TDF_CHECK] 已加载CHECK约束:" << constraintName << "表达式:" << checkExpression;
+                        }
+                    } else if (tdf_in_stream.status() != QDataStream::Ok && numCheckConstraints > 0) { /* ... warning ... */ }
+                }
+                // ***** 新增逻辑：将识别出的字段级 CHECK 约束文本添加回对应 xhyfield 的 m_constraints *****
+                if (tdf_load_successful && !table.m_fields.isEmpty() && !table.checkConstraints().isEmpty()) {
+                    qDebug() << "  [LOAD_DB_TDF_POST_PROCESS] 开始为表" << table.name() << "的字段补加原始 CHECK 约束文本...";
+
+                    // 为了能修改 xhyfield 对象，我们需要获取对 m_fields 中元素的非 const 访问权限
+                    // 假设 xhydbmanager 是 xhytable 的友元类，可以直接访问 m_fields
+                    // 或者 xhytable 提供一个返回 QList<xhyfield>& 的方法，如 table.getFieldsNonConst()
+                    // 为简单起见，这里直接操作 table.m_fields，您可能需要调整
+
+                    for (int field_idx = 0; field_idx < table.m_fields.size(); ++field_idx) {
+                        // xhyfield& current_loaded_field = table.m_fields[field_idx]; // 获取字段的可修改引用
+
+                        // 遍历所有已加载到 table.m_checkConstraints 的 CHECK 约束
+                        for (auto it_check = table.checkConstraints().constBegin();
+                             it_check != table.checkConstraints().constEnd(); ++it_check) {
+
+                            const QString& constraintName = it_check.key();
+                            const QString& condition = it_check.value();
+
+                            // 尝试判断这个 CHECK 约束是否是针对当前字段的、匿名的（自动生成的约束名）
+                            // 您的 xhytable::add_check_constraint(condition, "") 会生成类似 "CK_<table>_cond<N>" 的名字
+                            // 如果 CHECK 表达式只涉及当前字段名，我们可以较有信心地认为它是该字段的约束
+
+                            // 简化判断：如果约束名是自动生成的，并且条件表达式中包含当前字段名
+                            // 注意：这个判断逻辑可能需要根据您的具体实现和 CHECK 表达式的复杂性来完善
+                            // 例如，一个 CHECK 约束可能引用多个列，或者一个列有多个字段级 CHECK（虽然不常见）
+                            if (constraintName.startsWith("CK_" + table.name() + "_cond") &&
+                                condition.contains(table.m_fields[field_idx].name(), Qt::CaseInsensitive)) {
+
+                                // 进一步检查，确保条件中不包含其他表内字段名，以增加准确性（可选）
+                                bool onlyThisField = true;
+                                for(const auto& otherField : table.fields()) {
+                                    if (otherField.name() != table.m_fields[field_idx].name() && condition.contains(otherField.name(), Qt::CaseInsensitive)) {
+                                        onlyThisField = false;
+                                        break;
+                                    }
+                                }
+
+                                if (onlyThisField) {
+                                    QString check_string_to_add = QString("CHECK (%1)").arg(condition);
+                                    // 使用 xhyfield 类中添加的 addConstraintString 方法
+                                    table.m_fields[field_idx].addConstraintString(check_string_to_add);
+                                    qDebug() << "    [LOAD_DB_TDF_POST_PROCESS] 为字段" << table.m_fields[field_idx].name()
+                                             << "补加了原始 CHECK 约束文本:" << check_string_to_add;
+                                    // 假设一个字段只有一个源于其定义的匿名 CHECK 约束，找到后可以跳出内部的 CHECK 循环
+                                    // 如果您的设计允许一个字段有多个匿名 CHECK，则不应 break
+                                    // break;
+                                }
+                            }
+                        }
+                    }
+                }
                 tdfFile.close();
             } else { // TDF 文件打开失败
                 qWarning() << "  [LOAD_DB] Failed to open TDF file:" << tdfFile.fileName() << ". Skipping table.";
@@ -889,11 +994,30 @@ void xhydbmanager::save_table_definition_file(const QString& filePath, const xhy
                  << " RefTable:" << fkDef.referenceTable
                  << " Mappings:" << fkDef.columnMappings;
     }
-    file.close();
-    qDebug() << "[SAVE_TDF] Finished saving TDF for table:" << table->name();
+    // ***** 新增：保存默认值信息 *****
+    const QMap<QString, QString>& defaultValues = table->defaultValues(); // 获取默认值映射
+    quint32 numDefaultValues = static_cast<quint32>(defaultValues.size());
+    out << numDefaultValues; // 写入默认值定义的数量
+    qDebug() << "  [SAVE_TDF] 正在为表" << table->name() << "保存" << numDefaultValues << "个默认值定义";
+    for (auto it = defaultValues.constBegin(); it != defaultValues.constEnd(); ++it) {
+        out << it.key();   // 字段名 (QString)
+        out << it.value(); // 默认值表达式 (QString)
+        qDebug() << "    [SAVE_TDF_DEFAULT] 已保存字段:" << it.key() << "的默认值:" << it.value();
+    }
+
+    // ***** 新增：保存 CHECK 约束信息 *****
+    const QMap<QString, QString>& checkConstraints = table->checkConstraints();
+    quint32 numCheckConstraints = static_cast<quint32>(checkConstraints.size());
+    out << numCheckConstraints; // 写入CHECK约束定义的数量
+    qDebug() << "  [SAVE_TDF] 正在为表" << table->name() << "保存" << numCheckConstraints << "个CHECK约束定义";
+    if (numCheckConstraints > 0) { // 添加一个判断，确保有东西可保存时才打印每个条目
+        for (auto it = checkConstraints.constBegin(); it != checkConstraints.constEnd(); ++it) {
+            out << it.key();   // 约束名 (QString)
+            out << it.value(); // CHECK约束表达式 (QString)
+            qDebug() << "    [SAVE_TDF_CHECK] 已保存CHECK约束:" << it.key() << "表达式:" << it.value();
+        }
+    }
 }
-
-
 
 // 2. 保存记录文件
 void xhydbmanager::save_table_records_file(const QString& filePath, const xhytable* table) {

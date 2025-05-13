@@ -94,7 +94,7 @@ public:
 
     bool checkInsertConstraints(const QMap<QString, QString> &fieldValues) const;
     bool checkUpdateConstraints(const QMap<QString, QString> &updates, const ConditionNode &conditions) const;
-private:
+
     // 新增：检查删除父记录时的外键限制 (RESTRICT)
     bool checkForeignKeyDeleteRestrictions(const xhyrecord& recordToDelete) const;
 

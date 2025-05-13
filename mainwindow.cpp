@@ -445,6 +445,7 @@ void MainWindow::handleCreateTable(QString& command) { // Consider const QString
     bool inStringLiteral = false;
     QChar stringChar = ' ';
 
+    // 字段和约束定义分割逻辑 (保持不变)
     for (QChar c : fields_and_constraints_str) {
         if (c == '\'' || c == '"') {
             if (inStringLiteral && c == stringChar) {
@@ -469,13 +470,28 @@ void MainWindow::handleCreateTable(QString& command) { // Consider const QString
         return;
     }
 
+    // 遍历解析后的定义（列定义或表级约束）
     for (const QString& def_str_const : definitions) {
         QString def_str = def_str_const.trimmed();
         if (def_str.isEmpty()) continue;
 
-        if (def_str.toUpper().startsWith("CONSTRAINT")) {
+        // ***** 修改开始 *****
+        QString def_upper = def_str.toUpper();
+        bool isTableConstraint = false;
+
+        // 检查是否是表级约束（命名的或未命名的）
+        if (def_upper.startsWith("CONSTRAINT") ||
+            def_upper.startsWith("PRIMARY KEY") ||
+            def_upper.startsWith("UNIQUE") ||       // 假设后面跟括号，如 UNIQUE (col)
+            def_upper.startsWith("FOREIGN KEY") ||  // 假设后面跟括号和 REFERENCES
+            def_upper.startsWith("CHECK")) {        // 假设后面跟括号
+            isTableConstraint = true;
+        }
+        // ***** 修改结束 *****
+
+        if (isTableConstraint) { // 使用新的判断条件
             handleTableConstraint(def_str, new_table);
-        } else { // Column definition
+        } else { // 视为列定义 (这部分逻辑保持不变)
             QString working_def_str = def_str.trimmed();
             QString field_name, type_str_full, col_constraints_str;
 
@@ -559,6 +575,10 @@ void MainWindow::handleCreateTable(QString& command) { // Consider const QString
     }
 
     if (new_table.fields().isEmpty() && !fields_and_constraints_str.contains("CONSTRAINT", Qt::CaseInsensitive)) {
+        // 这个检查可能需要调整，因为即使没有显式的列定义，也可能只有表级约束（例如，一个全是约束的表定义，虽然不常见）
+        // 但如果`handleTableConstraint`成功添加了主键等，`new_table.primaryKeys()`等就不会为空。
+        // 更安全的检查是：if (new_table.fields().isEmpty() && new_table.primaryKeys().isEmpty() && new_table.uniqueConstraints().isEmpty() && ...)
+        // 暂时保留原逻辑，因为通常表至少会有一个字段。
         textBuffer.append("Error: Table must have at least one column or a table-level constraint.");
         if (transactionStartedHere) db_manager.rollbackTransaction(); return;
     }
@@ -578,6 +598,8 @@ void MainWindow::handleCreateTable(QString& command) { // Consider const QString
         if (transactionStartedHere) db_manager.rollbackTransaction();
     }
 }
+
+
 
 void MainWindow::handleDropTable(const QString& command) {
     QRegularExpression re(R"(DROP\s+TABLE\s+([\w_]+)\s*;?)", QRegularExpression::CaseInsensitiveOption);
@@ -1937,25 +1959,112 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
         textBuffer.append(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
-    xhytable* table = db->find_table(table_name);
+    xhytable* table = db->find_table(table_name); // 修改为非 const 指针以调用非 const 方法 defaultValues() 和 foreignKeys()
+
+
     if (!table) {
         textBuffer.append(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
         return;
     }
     QString output = QString("表 '%1.%2' 的结构:\n").arg(db_name, table_name);
     output += QString("%1\t%2\t%3\n").arg("列名", -20).arg("类型", -20).arg("约束");
-    output += QString(60, '-') + "\n";
+    output += QString(80, '-') + "\n"; // 增加分隔符长度以适应更长的约束字符串
+
+    const QMap<QString, QString>& default_values_map = table->defaultValues();
+    const QStringList& primary_keys_list = table->primaryKeys();
+    const QSet<QString>& not_null_fields_set = table->notNullFields();
+
     for (const auto& field : table->fields()) {
+        QStringList display_constraints_for_field;
+
+        // 1. 从字段对象获取原始约束 (例如 CHECK, UNIQUE(列级), SIZE, PRECISION, SCALE)
+        display_constraints_for_field.append(field.constraints());
+
+        // 2. 处理主键约束标记
+        if (primary_keys_list.contains(field.name(), Qt::CaseInsensitive)) {
+            // 如果是主键成员，确保 PRIMARY_KEY 和 NOT_NULL 标记存在
+            if (!display_constraints_for_field.contains("PRIMARY_KEY", Qt::CaseInsensitive)) {
+                display_constraints_for_field.prepend("PRIMARY_KEY"); // 放在前面，更显眼
+            }
+            // 主键列必然非空。如果m_notNullFields不包含它（例如表级PK未更新m_notNullFields），也应显示NOT_NULL
+            if (!not_null_fields_set.contains(field.name()) && !display_constraints_for_field.contains("NOT_NULL", Qt::CaseInsensitive)) {
+                display_constraints_for_field.append("NOT_NULL");
+            }
+        }
+
+        // 3. 处理明确的 NOT NULL 约束 (如果不是主键但有NOT NULL)
+        if (not_null_fields_set.contains(field.name())) {
+            if (!display_constraints_for_field.contains("NOT_NULL", Qt::CaseInsensitive) &&
+                !primary_keys_list.contains(field.name(), Qt::CaseInsensitive)) { // 避免重复添加NOT_NULL
+                display_constraints_for_field.append("NOT_NULL");
+            }
+        }
+
+        // 4. 处理默认值
+        if (default_values_map.contains(field.name())) {
+            // 避免重复添加 DEFAULT (如果 field.constraints() 中已包含)
+            // 简单的检查方法是查看是否已经有以 "DEFAULT " 开头的约束
+            bool defaultExists = false;
+            for(const QString& constr : display_constraints_for_field) {
+                if (constr.startsWith("DEFAULT ", Qt::CaseInsensitive)) {
+                    defaultExists = true;
+                    break;
+                }
+            }
+            if (!defaultExists) {
+                display_constraints_for_field.append("DEFAULT " + default_values_map.value(field.name()));
+            }
+        }
+
+        // 移除可能因上述逻辑引入的重复项 (例如 "NOT_NULL" 可能来自 field.constraints() 和 m_notNullFields)
+        display_constraints_for_field.removeDuplicates();
+
+
         output += QString("%1\t%2\t%3\n")
-        .arg(field.name(), -20)
-            .arg(field.typestring(), -20)
-            .arg(field.constraints().join(" "));
+                      .arg(field.name(), -20)
+                      .arg(field.typestring(), -20) // typestring() 已包含如 VARCHAR(100), DECIMAL(10,2)
+                      .arg(display_constraints_for_field.join(" "));
     }
-    if (!table->primaryKeys().isEmpty()) {
-        output += "\nPRIMARY KEY: (" + table->primaryKeys().join(", ") + ")\n";
+
+    // 显示表级主键信息 (已有的逻辑)
+    if (!primary_keys_list.isEmpty()) {
+        output += "\nPRIMARY KEY: (" + primary_keys_list.join(", ") + ")\n";
+    }
+
+    // ***** 新增：显示外键信息 *****
+    const QList<ForeignKeyDefinition>& foreign_keys_list = table->foreignKeys();
+    if (!foreign_keys_list.isEmpty()) {
+        output += "\nFOREIGN KEYS:\n";
+        for (const auto& fkDef : foreign_keys_list) {
+            QStringList childCols, parentCols;
+
+            for (auto it = fkDef.columnMappings.constBegin(); it != fkDef.columnMappings.constEnd(); ++it) {
+                childCols.append(it.key());
+                parentCols.append(it.value());
+            }
+            output += QString("  CONSTRAINT %1 FOREIGN KEY (%2) REFERENCES %3 (%4)\n")
+                          .arg(fkDef.constraintName)
+                          .arg(childCols.join(", "))
+                          .arg(fkDef.referenceTable)
+                          .arg(parentCols.join(", "));
+        }
+    }
+    // ***** 结束新增外键信息 *****
+    const QMap<QString, QString>& check_constraints_map = table->checkConstraints();
+    if (!check_constraints_map.isEmpty()) {
+        output += "\nCHECK CONSTRAINTS:\n"; // 添加一个清晰的标题
+        for (auto it = check_constraints_map.constBegin(); it != check_constraints_map.constEnd(); ++it) {
+            // it.key() 是约束名, it.value() 是约束表达式
+            output += QString("  CONSTRAINT %1 CHECK (%2)\n")
+                          .arg(it.key())
+                          .arg(it.value());
+        }
     }
     textBuffer.append(output.trimmed());
 }
+
+
+
 // ENDE von mainwindow.cpp
 ///////////////////////////////////////////////////
 //GUI

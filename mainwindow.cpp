@@ -6,6 +6,7 @@
 #include "xhydatabase.h"
 #include "xhyindex.h"
 #include "ConditionNode.h" // 确保这个 include 存在
+#include "createuserdialog.h" // <-- 如果要打开注册用户对话框，需要包含此头文件
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QDebug>
@@ -19,6 +20,11 @@
 #include <stdexcept> // 包含 stdexcept
 #include <limits>    // 用于 std::numeric_limits
 #include <QRegularExpressionMatchIterator>
+#include <QMenu>          // <-- 添加这一行
+#include <QMenuBar>       // <-- 添加这一行
+#include <QAction>        // <-- 添加这一行
+
+
 
 MainWindow::MainWindow(const QString &name,QWidget *parent)
     : QMainWindow(parent)
@@ -32,6 +38,36 @@ MainWindow::MainWindow(const QString &name,QWidget *parent)
         qWarning() << "警告：用户数据加载/初始化失败。";
     }
     db_manager.load_databases_from_files();
+
+    //菜单栏（注册账号）
+
+    // 获取或创建主窗口的菜单栏
+    QMenuBar *menuBar = this->menuBar(); // QMainWindow::menuBar() 会返回菜单栏指针，如果没有则会自动创建
+
+    // 1. 添加“帮助”菜单及其子项
+    QMenu *helpMenu = menuBar->addMenu("帮助(&H)"); // "&H" 是快捷键提示，按Alt+H可以快速打开
+    QAction *aboutAction = new QAction("相关(&A)...", this); // <-- 修正后的代码
+    helpMenu->addAction(aboutAction);
+
+    // 连接“相关”菜单项的触发信号到显示“关于”对话框的槽函数
+    connect(aboutAction, &QAction::triggered, this, [this](){
+        QMessageBox::about(this, "关于 Mini DBMS", "Mini DBMS 是一个迷你数据库管理系统。\n\n版本: 1.0\。");
+    });
+
+    // 2. 添加“账户”菜单及其子项
+    QMenu *accountMenu = menuBar->addMenu("账户(&C)"); // "&C" 是快捷键提示
+    QAction *registerAccountAction = new QAction("注册账户(&R)...", this); // <-- 修正后的代码
+    accountMenu->addAction(registerAccountAction);
+
+    if (Account.getUserRole(username) < 2) { // 只有权限等于2（管理员）的用户才能看到“注册账户”
+        registerAccountAction->setVisible(false); // 隐藏该菜单项
+    }
+
+    // 连接“注册账户”菜单项的触发信号到打开注册用户对话框的槽函数
+    connect(registerAccountAction, &QAction::triggered, this, &MainWindow::openRegisterUserDialog);
+
+    // ====================== 结束添加菜单栏代码 ======================
+
 
     //GUI
     ui->linkButton->setEnabled(false);
@@ -1294,20 +1330,62 @@ void MainWindow::handleDelete(const QString& command) {
     }
 }
 
+// by zyh
 void MainWindow::handleSelect(const QString& command) {
+    // 解析 SELECT 语句，支持表别名
     QRegularExpression re(
-        R"(SELECT\s+(.+?)\s+FROM\s+([\w\.]+)(?:\s+WHERE\s+(.+))?\s*;?)",
-        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption
+        R"(SELECT\s+(.+?)\s+FROM\s+(\S+?)(?:\s+(?:AS\s+)?(?!ORDER\s+BY|WHERE|GROUP\s+BY|HAVING|LIMIT)(\w+))?\s*(?:WHERE\s+(.+?))?\s*(?:GROUP\s+BY\s+(.+?))?\s*(?:HAVING\s+(.+?))?\s*(?:ORDER\s+BY\s+([\w\s,]+))?\s*(?:LIMIT\s+(\d+))?\s*;?\s*$)",
+        QRegularExpression::CaseInsensitiveOption
         );
     QRegularExpressionMatch match = re.match(command.trimmed());
+
+    /* 后面记得用这个，下面只是用于调试
     if (!match.hasMatch()) {
-        textBuffer.append("语法错误: SELECT <列名1,...|*> FROM <表名> [WHERE <条件>]");
+        textBuffer.append("语法错误: SELECT <列名1,...|*> FROM <表名> [AS <别名>] [WHERE <条件>] [GROUP BY <列1,...>] [HAVING <条件>] [ORDER BY <列1> [ASC|DESC],...] [LIMIT <数量>]");
+        return;
+    }
+*/
+
+    // 添加调试信息在这里
+    qDebug() << "解析SQL: " << command;
+    qDebug() << "匹配成功: " << match.hasMatch();
+    qDebug() << "从SQL: " << command << "中提取表名";
+    qDebug() << "匹配的表名: " << match.captured(2);
+    if (match.hasMatch()) {
+        qDebug() << "捕获组1 (SELECT列): " << match.captured(1);
+        qDebug() << "捕获组2 (FROM表): " << match.captured(2);
+        qDebug() << "捕获组3 (表别名): " << match.captured(3);
+        qDebug() << "捕获组4 (WHERE): " << match.captured(4);
+        qDebug() << "捕获组5 (GROUP BY): " << match.captured(5);
+        qDebug() << "捕获组6 (HAVING): " << match.captured(6);
+        qDebug() << "捕获组7 (ORDER BY): " << match.captured(7);
+        qDebug() << "捕获组8 (LIMIT): " << match.captured(8);
+    } else {
+        qDebug() << "SQL语法匹配失败!";
+        textBuffer.append("语法错误: SELECT <列名1,...|*> FROM <表名> [AS <别名>] [WHERE <条件>] [GROUP BY <列1,...>] [HAVING <条件>] [ORDER BY <列1> [ASC|DESC],...] [LIMIT <数量>]");
         return;
     }
 
     QString select_cols_str = match.captured(1).trimmed();
     QString table_name = match.captured(2).trimmed();
-    QString where_part = match.captured(3).trimmed();
+    QString table_alias = match.captured(3).trimmed();
+    QString where_part = match.captured(4).trimmed();
+    QString group_by_part = match.captured(5).trimmed();
+    QString having_part = match.captured(6).trimmed();
+    QString order_by_part = match.captured(7).trimmed();
+    QString limit_part = match.captured(8).trimmed();
+
+    // 解析LIMIT子句
+    int limit = -1; // 默认不限制
+    if (!limit_part.isEmpty()) {
+        bool ok;
+        limit = limit_part.toInt(&ok);
+        if (!ok || limit < 0) {
+            textBuffer.append("错误: LIMIT子句必须是一个非负整数。");
+            return;
+        }
+    }
+
     QString current_db_name = db_manager.get_current_database();
 
     if (current_db_name.isEmpty()) { textBuffer.append("错误: 未选择数据库。"); return; }
@@ -1317,47 +1395,382 @@ void MainWindow::handleSelect(const QString& command) {
     xhytable* table = db->find_table(table_name);
     if (!table) { textBuffer.append(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, current_db_name)); return; }
 
+    // 工具函数：去表别名
+    // 修改后 - 在MainWindow::handleSelect函数中
+    auto removeAlias = [&](const QString& col) -> QString {
+        return this->removeTableAlias(col, table_alias, table_name);
+    };
+
+    // 处理WHERE条件
     ConditionNode conditionRoot;
-    if (!parseWhereClause(where_part, conditionRoot)) { return; } // **Aufruf**
+    if (!where_part.isEmpty() && !parseWhereClause(where_part, conditionRoot)) {
+        return;
+    }
 
     QVector<xhyrecord> results;
     if (!db_manager.selectData(current_db_name, table_name, conditionRoot, results)) {
         return;
     }
 
-    if (results.isEmpty()) {
-        textBuffer.append("查询结果为空。");
-        return;
-    }
+    // 解析SELECT列
+    bool hasAggregateFunction = false;
+    QStringList display_columns; // 显示名称（可能有别名）
+    QMap<QString, QString> column_aliases; // 列名到显示名称
+    QMap<QString, QPair<QString, QString>> aggregateFuncs; // 显示名 -> <函数名, 列名>
+    QMap<QString, QString> columnRealNames; // 显示名 -> 原始列名
 
-    QStringList display_columns;
     if (select_cols_str == "*") {
-        for (const auto& field : table->fields()) {
-            display_columns.append(field.name());
+        const QList<xhyfield>& fields = table->fields();
+        for (int i = 0; i < fields.size(); ++i) {
+            const QString& fieldName = fields[i].name();
+            display_columns.append(fieldName);
+            columnRealNames[fieldName] = fieldName;
         }
     } else {
-        display_columns = select_cols_str.split(',', Qt::SkipEmptyParts);
-        for (QString& col : display_columns) {
-            col = col.trimmed();
-            if (!table->has_field(col)) {
-                textBuffer.append(QString("错误: 选择的列 '%1' 在表 '%2' 中不存在。").arg(col, table_name));
+        QStringList cols = select_cols_str.split(',', Qt::SkipEmptyParts);
+        for (int i = 0; i < cols.size(); ++i) {
+            QString col = cols[i].trimmed();
+            // 检查是否为聚合函数
+            QRegularExpression funcRe(R"(^(COUNT|SUM|AVG|MIN|MAX)\(([^)]*)\)(?:\s+AS\s+(.+))?$)", QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch funcMatch = funcRe.match(col);
+            if (funcMatch.hasMatch()) {
+                hasAggregateFunction = true;
+                QString functionType = funcMatch.captured(1).toUpper();
+                QString columnName = removeAlias(funcMatch.captured(2).trimmed());
+                QString aliasName = funcMatch.captured(3).trimmed();
+                if (aliasName.isEmpty()) aliasName = functionType + "(" + columnName + ")";
+                if (columnName != "*" && !columnName.isEmpty() && !table->has_field(columnName)) {
+                    textBuffer.append(QString("错误: 聚合函数中的列 '%1' 在表 '%2' 中不存在。").arg(columnName, table_name));
+                    return;
+                }
+                aggregateFuncs[aliasName] = qMakePair(functionType, columnName);
+                display_columns.append(aliasName);
+            } else {
+                QRegularExpression aliasRe(R"(^([\w\.]+)(?:\s+AS\s+(.+))?$)", QRegularExpression::CaseInsensitiveOption);
+                QRegularExpressionMatch aliasMatch = aliasRe.match(col);
+                if (aliasMatch.hasMatch()) {
+                    QString realColumnName = removeAlias(aliasMatch.captured(1).trimmed());
+                    QString alias = aliasMatch.captured(2).trimmed();
+                    if (!table->has_field(realColumnName)) {
+                        textBuffer.append(QString("错误: 选择的列 '%1' 在表 '%2' 中不存在。").arg(realColumnName, table_name));
+                        return;
+                    }
+                    QString displayName = alias.isEmpty() ? realColumnName : alias;
+                    display_columns.append(displayName);
+                    columnRealNames[displayName] = realColumnName;
+                    if (!alias.isEmpty()) column_aliases[realColumnName] = displayName;
+                } else {
+                    QString realColumnName = removeAlias(col);
+                    if (!table->has_field(realColumnName)) {
+                        textBuffer.append(QString("错误: 选择的列 '%1' 在表 '%2' 中不存在。").arg(realColumnName, table_name));
+                        return;
+                    }
+                    display_columns.append(col);
+                    columnRealNames[col] = realColumnName;
+                }
+            }
+        }
+    }
+
+    // 处理GROUP BY
+    QStringList groupByColumns;
+    if (!group_by_part.isEmpty()) {
+        groupByColumns = group_by_part.split(',', Qt::SkipEmptyParts);
+        for (int i = 0; i < groupByColumns.size(); ++i) {
+            QString originalCol = groupByColumns[i];
+            groupByColumns[i] = removeAlias(groupByColumns[i]);
+            if (!table->has_field(groupByColumns[i])) {
+                // 尝试查找是否是表别名的问题
+                if (originalCol.contains('.') && !table_alias.isEmpty()) {
+                    QString prefix = originalCol.split('.').first();
+                    if (prefix == table_alias) {
+                        // 获取除别名外的列名部分
+                        QString colOnly = originalCol.mid(prefix.length() + 1);
+                        if (table->has_field(colOnly)) {
+                            groupByColumns[i] = colOnly;
+                            continue;
+                        }
+                    }
+                }
+                textBuffer.append(QString("错误: GROUP BY中的列 '%1' 未在选择列表中或表中不存在。").arg(originalCol));
                 return;
             }
         }
     }
 
+    // 分组：key为所有分组列值组成的QList
+    using GroupKey = QList<QString>;
+    // 修改后 - 在mainwindow.cpp中的handleSelect函数内处理分组的代码
+    QMap<GroupKey, QVector<xhyrecord>> groupedResultsMap;
+    if (!groupByColumns.isEmpty()) {
+        for (const xhyrecord& record : results) {
+            GroupKey groupKey;
+            for (const QString& groupCol : groupByColumns) {
+                // 确保使用正确的列名而不是可能带表别名的原始名
+                QString realColName = groupCol; // 这里应已经是去掉别名的实际列名
+                groupKey << record.value(realColName);
+            }
+            groupedResultsMap[groupKey].append(record);
+        }
+    } else if (hasAggregateFunction) {
+        // 如果有聚合函数但没有GROUP BY，将所有记录放在一个组中
+        groupedResultsMap[GroupKey{"all"}] = results;
+    }
+
+    // 确保groupedResults有数据
+    QList<QPair<GroupKey, QVector<xhyrecord>>> groupedResults;
+    for (auto it = groupedResultsMap.begin(); it != groupedResultsMap.end(); ++it) {
+        groupedResults.append(qMakePair(it.key(), it.value()));
+    }
+
+    // HAVING过滤
+    // 修改后 - 在MainWindow::handleSelect函数中处理HAVING的部分
+    if (!having_part.isEmpty() && !groupByColumns.isEmpty()) {
+        // 支持简单的 HAVING <聚合函数>(列) <op> <值> 或 HAVING COUNT(*) > 数值 等形式
+        QRegularExpression havingRe(R"(([\w\(\)\*\.]+)\s*(=|!=|<>|<|>|<=|>=)\s*(.+))", QRegularExpression::CaseInsensitiveOption);
+        QRegularExpressionMatch havingMatch = havingRe.match(having_part);
+        if (havingMatch.hasMatch()) {
+            QString havingCol = havingMatch.captured(1).trimmed();
+            QString havingOp = havingMatch.captured(2).trimmed();
+            QString havingValStr = havingMatch.captured(3).trimmed();
+
+            // 处理引号包裹的字符串值
+            if ((havingValStr.startsWith('\'') && havingValStr.endsWith('\'')) ||
+                (havingValStr.startsWith('"') && havingValStr.endsWith('"'))) {
+                havingValStr = havingValStr.mid(1, havingValStr.length() - 2);
+            }
+
+            QString havingColNoAlias = removeAlias(havingCol);
+            QList<QPair<GroupKey, QVector<xhyrecord>>> filteredGroups;
+            QRegularExpression funcRe(R"(^(COUNT|SUM|AVG|MIN|MAX)\(([^)]*)\)$)", QRegularExpression::CaseInsensitiveOption);
+
+            for (const auto& pair : groupedResults) {
+                const GroupKey& groupKey = pair.first;
+                const QVector<xhyrecord>& group = pair.second;
+                QVariant groupAggValue;
+                bool isAggFunc = false;
+
+                QRegularExpressionMatch funcMatch = funcRe.match(havingColNoAlias);
+                if (funcMatch.hasMatch()) {
+                    QString funcType = funcMatch.captured(1).toUpper();
+                    QString colName = removeAlias(funcMatch.captured(2).trimmed());
+                    groupAggValue = calculateAggregate(funcType, colName, group);
+                    isAggFunc = true;
+                } else {
+                    // 尝试检查是否是分组列
+                    int idx = groupByColumns.indexOf(havingColNoAlias);
+                    if (idx != -1) {
+                        groupAggValue = groupKey[idx];
+                    } else {
+                        // 看看是不是 COUNT(*) 的特殊情况
+                        if (havingColNoAlias.toUpper() == "COUNT(*)") {
+                            groupAggValue = group.size();
+                            isAggFunc = true;
+                        }
+                    }
+                }
+
+                bool pass = false;
+                if (groupAggValue.isValid()) {
+                    // 获取比较值
+                    QVariant havingVal;
+                    bool isHavingValNumeric = false;
+                    double havingNumVal = havingValStr.toDouble(&isHavingValNumeric);
+
+                    if (isHavingValNumeric) {
+                        havingVal = havingNumVal;
+                    } else {
+                        havingVal = havingValStr;
+                    }
+
+                    // 判断聚合结果是否为数字
+                    bool isAggValueNumeric = false;
+                    double aggNumVal = 0.0;
+
+                    if (isAggFunc) {
+                        // 聚合函数结果通常是数值
+                        aggNumVal = groupAggValue.toDouble(&isAggValueNumeric);
+                    } else {
+                        // 尝试转换为数值
+                        aggNumVal = groupAggValue.toString().toDouble(&isAggValueNumeric);
+                    }
+
+                    // 执行比较
+                    if (isAggValueNumeric && isHavingValNumeric) {
+                        // 数值比较
+                        if (havingOp == "=" || havingOp == "==") pass = qFuzzyCompare(aggNumVal, havingNumVal);
+                        else if (havingOp == "!=" || havingOp == "<>") pass = !qFuzzyCompare(aggNumVal, havingNumVal);
+                        else if (havingOp == ">") pass = aggNumVal > havingNumVal;
+                        else if (havingOp == "<") pass = aggNumVal < havingNumVal;
+                        else if (havingOp == ">=") pass = aggNumVal >= havingNumVal;
+                        else if (havingOp == "<=") pass = aggNumVal <= havingNumVal;
+                    } else {
+                        // 字符串比较
+                        QString aggStrVal = groupAggValue.toString();
+                        if (havingOp == "=" || havingOp == "==") pass = (aggStrVal == havingValStr);
+                        else if (havingOp == "!=" || havingOp == "<>") pass = (aggStrVal != havingValStr);
+                        // 其他比较运算符不适用于非数值类型
+                    }
+                }
+
+                if (pass) {
+                    filteredGroups.append(pair);
+                }
+            }
+
+            groupedResults = filteredGroups;
+        } else {
+            textBuffer.append("警告: HAVING子句语法无效，已忽略: " + having_part);
+        }
+    }
+
+    // ORDER BY
+    QList<QPair<QString, bool>> orderColumns; // <列名, 是否降序>
+    if (!order_by_part.isEmpty()) {
+        QStringList orderParts = order_by_part.split(',', Qt::SkipEmptyParts);
+        for (const QString& part : orderParts) {
+            QString trimmedPart = part.trimmed();
+            QRegularExpression orderRe(R"(^([\w\.]+)(?:\s+(ASC|DESC))?$)", QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch orderMatch = orderRe.match(trimmedPart);
+            if (orderMatch.hasMatch()) {
+                QString colName = removeAlias(orderMatch.captured(1).trimmed());
+                bool isDesc = orderMatch.captured(2).trimmed().toUpper() == "DESC";
+                orderColumns.append(qMakePair(colName, isDesc));
+            } else {
+                textBuffer.append(QString("警告: ORDER BY子句语法无效: '%1'，已忽略。").arg(trimmedPart));
+            }
+        }
+    }
+    // 排序实现
+    if (!orderColumns.isEmpty()) {
+        if (!groupByColumns.isEmpty() || hasAggregateFunction) {
+            // 分组后排序
+            std::sort(groupedResults.begin(), groupedResults.end(), [&](const QPair<GroupKey, QVector<xhyrecord>>& a, const QPair<GroupKey, QVector<xhyrecord>>& b) {
+                for (const auto& orderPair : orderColumns) {
+                    const QString& colName = orderPair.first;
+                    bool isDesc = orderPair.second;
+                    // 先在分组列里找
+                    int idx = groupByColumns.indexOf(colName);
+                    if (idx != -1) {
+                        QString valA = a.first[idx], valB = b.first[idx];
+                        bool okA, okB;
+                        double numA = valA.toDouble(&okA), numB = valB.toDouble(&okB);
+                        int comp = 0;
+                        if (okA && okB) comp = numA < numB ? -1 : (numA > numB ? 1 : 0);
+                        else comp = valA.compare(valB, Qt::CaseInsensitive);
+                        if (comp != 0) return isDesc ? comp > 0 : comp < 0;
+                    } else if (aggregateFuncs.contains(colName)) {
+                        // 支持按聚合排序，比如 ORDER BY COUNT(*) DESC
+                        QVariant aggA = calculateAggregate(aggregateFuncs[colName].first, aggregateFuncs[colName].second, a.second);
+                        QVariant aggB = calculateAggregate(aggregateFuncs[colName].first, aggregateFuncs[colName].second, b.second);
+                        bool okA, okB;
+                        double numA = aggA.toDouble(&okA), numB = aggB.toDouble(&okB);
+                        int comp = 0;
+                        if (okA && okB) comp = numA < numB ? -1 : (numA > numB ? 1 : 0);
+                        else comp = aggA.toString().compare(aggB.toString(), Qt::CaseInsensitive);
+                        if (comp != 0) return isDesc ? comp > 0 : comp < 0;
+                    }
+                }
+                return false;
+            });
+        } else {
+            // 非分组，直接对results排序 - 修复排序逻辑
+            std::sort(results.begin(), results.end(), [&](const xhyrecord& a, const xhyrecord& b) {
+                for (const auto& orderPair : orderColumns) {
+                    const QString& colName = orderPair.first;
+                    bool isDesc = orderPair.second;
+                    QString valA = a.value(colName), valB = b.value(colName);
+                    bool okA, okB;
+                    double numA = valA.toDouble(&okA), numB = valB.toDouble(&okB);
+                    int comp = 0;
+
+                    if (okA && okB) {
+                        // 数值比较
+                        comp = (numA < numB) ? -1 : ((numA > numB) ? 1 : 0);
+                    } else {
+                        // 字符串比较
+                        comp = valA.compare(valB, Qt::CaseInsensitive);
+                    }
+
+                    if (comp != 0) {
+                        // 根据排序方向返回比较结果 - 修复排序逻辑
+                        return isDesc ? (comp > 0) : (comp < 0);
+                    }
+                }
+                return false;
+            });
+        }
+    }
+
+    // 准备输出数据
+    QList<QStringList> outputRows;
+
+    // 准备数据
+    if (!groupByColumns.isEmpty() || hasAggregateFunction) {
+        for (const auto& pair : groupedResults) {
+            const GroupKey& groupKey = pair.first;
+            const QVector<xhyrecord>& group = pair.second;
+            if (group.isEmpty()) continue;
+
+            QStringList row;
+            for (const QString& display_name : display_columns) {
+                bool isHandled = false;
+
+                // 处理分组列
+                for (int groupByIdx = 0; groupByIdx < groupByColumns.size(); ++groupByIdx) {
+                    if (display_name == groupByColumns[groupByIdx] ||
+                        columnRealNames.value(display_name, "") == groupByColumns[groupByIdx]) {
+                        row.append(groupKey[groupByIdx]);
+                        isHandled = true;
+                        break;
+                    }
+                }
+
+                // 如果不是分组列，检查是否是聚合函数
+                if (!isHandled && aggregateFuncs.contains(display_name)) {
+                    const QPair<QString, QString>& funcInfo = aggregateFuncs[display_name];
+                    QVariant result = calculateAggregate(funcInfo.first, funcInfo.second, group);
+                    row.append(result.isValid() ? result.toString() : "NULL");
+                    isHandled = true;
+                }
+
+                // 如果既不是分组列也不是聚合函数，则取该组的第一条记录对应列的值
+                if (!isHandled) {
+                    QString realColName = columnRealNames.value(display_name, display_name);
+                    row.append(group.first().value(realColName));
+                }
+            }
+            outputRows.append(row);
+        }
+    } else {
+        for (const auto& record : results) {
+            QStringList row;
+            for (const QString& display_name : display_columns) {
+                QString realColName = columnRealNames.value(display_name, display_name);
+                row.append(record.value(realColName));
+            }
+            outputRows.append(row);
+        }
+    }
+
+    // 应用LIMIT
+    if (limit > 0 && limit < outputRows.size()) {
+        outputRows = outputRows.mid(0, limit);
+    }
+
+    // 输出表头
     QString header_str;
-    for (const QString& col_name : display_columns) { header_str += col_name + "\t"; }
+    for (const QString& col_name : display_columns) header_str += col_name + "\t";
     textBuffer.append(header_str.trimmed());
     textBuffer.append(QString(header_str.length()*2 < 80 ? header_str.length()*2 : 80, '-'));
 
-    for (const auto& record : results) {
-        QString row_str;
-        for (const QString& col_name : display_columns) {
-            row_str += record.value(col_name) + "\t";
-        }
-        textBuffer.append(row_str.trimmed());
+    // 输出数据
+    for (const QStringList& row : outputRows) {
+        textBuffer.append(row.join("\t"));
     }
+
+    // 显示返回的记录数
+    textBuffer.append(QString("\n%1 行记录已返回").arg(outputRows.size()));
 }
 
 
@@ -2432,6 +2845,12 @@ void MainWindow::on_tabWidget_tabCloseRequested(int index)
     widget->deleteLater();
 }
 
+void MainWindow::openRegisterUserDialog()
+{
+    CreateUserDialog createUserDialog(&Account,&db_manager,this); // 创建注册用户对话框实例
+    createUserDialog.exec();
+}
+
 
 void MainWindow::dataSearch(){
     GUI_dbms.clear();
@@ -2688,3 +3107,108 @@ void MainWindow::on_addQuery_released()
     query->putin_focus();
 }
 
+// 由zyh新增，用于handleSelect里的聚组函数
+// 修改后 - MainWindow::calculateAggregate函数
+QVariant MainWindow::calculateAggregate(const QString& function, const QString& column, const QVector<xhyrecord>& records) {
+    // 特殊处理COUNT(*)
+    if (function == "COUNT" && (column == "*" || column.isEmpty())) {
+        return records.size();
+    }
+
+    // 列名为空但不是COUNT(*)的情况
+    if (column.isEmpty() && function != "COUNT") {
+        return QVariant();
+    }
+
+    if (function == "COUNT") {
+        int count = 0;
+        for (const auto& record : records) {
+            if (!record.value(column).isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    } else if (function == "SUM") {
+        double sum = 0.0;
+        bool valid = false;
+        for (const auto& record : records) {
+            bool ok;
+            double val = record.value(column).toDouble(&ok);
+            if (ok) {
+                sum += val;
+                valid = true;
+            }
+        }
+        return valid ? QVariant(sum) : QVariant();
+    } else if (function == "AVG") {
+        double sum = 0.0;
+        int count = 0;
+        for (const auto& record : records) {
+            bool ok;
+            double val = record.value(column).toDouble(&ok);
+            if (ok) {
+                sum += val;
+                count++;
+            }
+        }
+        if (count > 0) {
+            double avg = sum / count;
+            // 使用std::round四舍五入到两位小数
+            avg = std::round(avg * 100) / 100;
+            return QVariant(avg);
+        }
+        return QVariant();
+    } else if (function == "MIN") {
+        double min = std::numeric_limits<double>::max();
+        bool found = false;
+        for (const auto& record : records) {
+            bool ok;
+            double val = record.value(column).toDouble(&ok);
+            if (ok) {
+                min = qMin(min, val);
+                found = true;
+            }
+        }
+        return found ? QVariant(min) : QVariant();
+    } else if (function == "MAX") {
+        double max = std::numeric_limits<double>::lowest();
+        bool found = false;
+        for (const auto& record : records) {
+            bool ok;
+            double val = record.value(column).toDouble(&ok);
+            if (ok) {
+                max = qMax(max, val);
+                found = true;
+            }
+        }
+        return found ? QVariant(max) : QVariant();
+    }
+
+    return QVariant(); // NULL for unsupported functions
+}
+
+// 同上
+bool MainWindow::isNumeric(const QString& str) const {
+    bool ok;
+    str.toDouble(&ok);
+    return ok;
+}
+
+// 同上
+// 实现从.h移动到.cpp的removeTableAlias函数
+QString MainWindow::removeTableAlias(const QString& col, const QString& table_alias, const QString& table_name) {
+    QString result = col.trimmed();
+    if (!table_alias.isEmpty() && result.startsWith(table_alias + ".")) {
+        result = result.mid(table_alias.length() + 1);
+    } else {
+        int dotPos = result.indexOf('.');
+        if (dotPos != -1) {
+            QString prefix = result.left(dotPos);
+            QString colNameOnly = result.mid(dotPos + 1);
+            if (prefix.compare(table_name, Qt::CaseInsensitive) == 0) {
+                result = colNameOnly;
+            }
+        }
+    }
+    return result;
+}

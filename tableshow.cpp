@@ -91,6 +91,7 @@ void tableShow::resetShow(){
 
 void tableShow::on_addRecord_released()
 {
+    adding = true;
     ui->tableWidget->insertRow(ui->tableWidget->rowCount());
     resetButton(false);
 }
@@ -118,6 +119,7 @@ void tableShow::on_deleteRecord_released()
 
 void tableShow::on_comfirm_released()
 {
+    adding = false;
     QString insertString = "INSERT INTO "+m_table->name()+"(";
     int i=1;
     for(xhyfield field : m_table->fields()){
@@ -154,7 +156,7 @@ void tableShow::on_comfirm_released()
 void tableShow::on_cancle_released()
 {
     ui->tableWidget->removeRow(ui->tableWidget->rowCount()-1);
-
+    adding = false;
     resetButton(true);
 }
 
@@ -168,5 +170,9 @@ void tableShow::resetButton(bool yes){
 void tableShow::on_refresh_released()
 {
     resetShow();
+    if(adding) {
+        resetButton(true);
+        adding =false;
+    }
 }
 

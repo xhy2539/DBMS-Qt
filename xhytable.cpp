@@ -846,7 +846,7 @@ void xhytable::rollback() {
 namespace DefaultValueKeywords {
 const QString SQL_NULL = "##SQL_NULL##"; // 特殊标记代表 SQL NULL
 const QString CURRENT_TIMESTAMP_KW = "##CURRENT_TIMESTAMP##"; // 特殊标记代表 CURRENT_TIMESTAMP
-// 你也可以为 CURRENT_DATE, CURRENT_TIME 等添加类似标记
+const QString CURRENT_DATE_KW = "##CURRENT_DATE##";
 }
 bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
     qDebug() << "[表::插入数据] 尝试向表 '" << m_name << "' 插入数据，用户提供的值: " << fieldValuesFromUser;
@@ -860,11 +860,14 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
         if (valuesToInsert.contains(fieldName)) {
             if (valuesToInsert.value(fieldName).compare("DEFAULT", Qt::CaseInsensitive) == 0) {
                 if (m_defaultValues.contains(fieldName)) {
-                    QString storedDefault = m_defaultValues.value(fieldName);
+                    QString storedDefault = m_defaultValues.value(fieldName).trimmed();;
+
                     if (storedDefault == DefaultValueKeywords::SQL_NULL) {
                         valuesToInsert[fieldName] = QString(); // SQL NULL
                     } else if (storedDefault == DefaultValueKeywords::CURRENT_TIMESTAMP_KW) {
                         valuesToInsert[fieldName] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs); // 或 Qt::ISODate
+                    } else if (storedDefault == DefaultValueKeywords::CURRENT_DATE_KW) { // <--- 新增处理 CURRENT_DATE_KW
+                        valuesToInsert[fieldName] = QDate::currentDate().toString(Qt::ISODate); // 使用当前日期
                     } else {
                         valuesToInsert[fieldName] = storedDefault; // 普通字面量
                     }
@@ -887,7 +890,9 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
                     valuesToInsert[fieldName] = QString(); // SQL NULL
                 } else if (storedDefault == DefaultValueKeywords::CURRENT_TIMESTAMP_KW) {
                     valuesToInsert[fieldName] = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-                } else {
+                }  else if (storedDefault == DefaultValueKeywords::CURRENT_DATE_KW) { // <--- 新增处理 CURRENT_DATE_KW
+                    valuesToInsert[fieldName] = QDate::currentDate().toString(Qt::ISODate); // 使用当前日期
+                }else {
                     valuesToInsert[fieldName] = storedDefault; // 普通字面量
                 }
                 qDebug() << "  字段 '" << fieldName << "' 用户未提供, 应用解析后的默认值: '" << valuesToInsert[fieldName] << "'";

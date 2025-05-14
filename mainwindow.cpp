@@ -1215,6 +1215,7 @@ bool MainWindow::parseWhereClause(const QString& whereStr, ConditionNode& rootNo
 }
 
 
+// mainwindow.cpp
 void MainWindow::handleUpdate(const QString& command) {
     QString current_db_name = db_manager.get_current_database();
     if (current_db_name.isEmpty()) {
@@ -1222,6 +1223,7 @@ void MainWindow::handleUpdate(const QString& command) {
         return;
     }
 
+    // 保持原来的顶级 UPDATE 语句正则表达式
     QRegularExpression re(
         R"(UPDATE\s+([\w\.]+)\s+SET\s+(.+?)(?:\s+WHERE\s+(.+))?\s*;?$)",
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption
@@ -1234,64 +1236,196 @@ void MainWindow::handleUpdate(const QString& command) {
     }
 
     QString table_name = match.captured(1).trimmed();
-    QString set_part = match.captured(2).trimmed();
+    QString set_part_str = match.captured(2).trimmed(); // 完整 SET 子句字符串, e.g., "col1 = val1, col2 = expr2"
     QString where_part = match.captured(3).trimmed();
 
+    qDebug() << "[MainWindow::handleUpdate] == 进入 handleUpdate 函数 ==";
+    qDebug() << "[MainWindow::handleUpdate] 原始命令:" << command;
+    qDebug() << "[MainWindow::handleUpdate] 提取的表名:" << table_name;
+    qDebug() << "[MainWindow::handleUpdate] 提取的完整SET部分:" << set_part_str;
+    qDebug() << "[MainWindow::handleUpdate] 提取的WHERE部分:" << where_part;
 
     bool transactionStartedHere = false;
     if (!db_manager.isInTransaction()) {
+        qDebug() << "[MainWindow::handleUpdate] 当前无活动事务，尝试为数据库启动新事务:" << current_db_name;
         if (!db_manager.beginTransaction()) {
-            textBuffer.append("警告: 无法开始新事务，操作将在无事务保护下进行。");
+            textBuffer.append("警告: 无法为UPDATE操作开始新事务，操作将在无事务保护下进行。");
+            qWarning() << "[MainWindow::handleUpdate] 为数据库启动新事务失败:" << current_db_name;
         } else {
             transactionStartedHere = true;
+            qDebug() << "[MainWindow::handleUpdate] 已为数据库成功启动新事务:" << current_db_name;
         }
+    } else {
+        qDebug() << "[MainWindow::handleUpdate] 当前已在数据库的活动事务中:" << current_db_name;
     }
 
     try {
-        QMap<QString, QString> updates;
-        QStringList set_clauses = set_part.split(QLatin1Char(','), Qt::SkipEmptyParts);
-        for (const QString& clause : set_clauses) {
-            QStringList parts = clause.split(QLatin1Char('='));
-            if (parts.size() == 2) {
-                QString fieldName = parts[0].trimmed();
-                QString valueStr = parts[1].trimmed();
-                QVariant parsedVal = parseLiteralValue(valueStr); // **Aufruf**
-                updates[fieldName] = parsedVal.isNull() ? "NULL" : parsedVal.toString();
+        QMap<QString, QString> updates; // 存储 列名 -> 完整值表达式字符串
+        int current_pos = 0;
+        QString remaining_set_part = set_part_str;
+
+        qDebug() << "[MainWindow::handleUpdate] 开始解析SET子句: '" << remaining_set_part << "'";
+
+        while(current_pos < remaining_set_part.length()) {
+            // 1. 提取列名
+            int equals_sign_pos = -1;
+            QString current_col_name_candidate;
+            int temp_search_pos = current_pos;
+
+            // 查找列名直到 '='
+            // 列名可以是被反引号` `或方括号[ ]包围的，或者就是普通标识符
+            QRegularExpression columnNameRe(R"(([\w_]+|`[^`]+`|\[[^\]]+\])\s*=)");
+            columnNameRe.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch colNameMatch = columnNameRe.match(remaining_set_part, current_pos);
+
+            if (colNameMatch.hasMatch() && colNameMatch.capturedStart() == current_pos) {
+                current_col_name_candidate = colNameMatch.captured(1).trimmed(); // 列名本身
+                // 如果列名被包围，移除包围符号
+                if ((current_col_name_candidate.startsWith('`') && current_col_name_candidate.endsWith('`')) ||
+                    (current_col_name_candidate.startsWith('[') && current_col_name_candidate.endsWith(']'))) {
+                    current_col_name_candidate = current_col_name_candidate.mid(1, current_col_name_candidate.length() - 2);
+                }
+                equals_sign_pos = colNameMatch.capturedEnd(1); // 等号开始的位置 (在匹配的列名之后，等号之前)
+                    // 我们需要的是等号之后值开始的位置
+                while(equals_sign_pos < remaining_set_part.length() && remaining_set_part.at(equals_sign_pos).isSpace()) {
+                    equals_sign_pos++; // 跳过列名和等号间的空格
+                }
+                if (equals_sign_pos < remaining_set_part.length() && remaining_set_part.at(equals_sign_pos) == '=') {
+                    // 正确找到了列名和等号
+                } else {
+                    throw std::runtime_error("SET子句解析错误：在列名 '" + current_col_name_candidate.toStdString() + "' 后缺少 '='。");
+                }
+
             } else {
-                throw std::runtime_error(("无效的SET子句: " + clause).toStdString());
+                throw std::runtime_error("SET子句解析错误：无法在位置 " + QString::number(current_pos).toStdString() + " 处找到有效的 '列名 =' 模式。剩余: '" + remaining_set_part.mid(current_pos).toStdString() + "'");
             }
+
+            QString fieldName = current_col_name_candidate;
+            qDebug() << "[MainWindow::handleUpdate]   解析到列名: '" << fieldName << "'";
+
+            // 2. 提取值表达式 (直到下一个顶层逗号或字符串末尾)
+            int value_expression_start_pos = equals_sign_pos + 1; // 等号之后是值表达式的开始
+            while(value_expression_start_pos < remaining_set_part.length() && remaining_set_part.at(value_expression_start_pos).isSpace()){
+                value_expression_start_pos++; // 跳过等号后的空格
+            }
+
+            int value_expression_end_pos = value_expression_start_pos;
+            int parentheses_level = 0;
+            bool in_string_literal = false;
+            QChar string_literal_char = ' ';
+
+            while(value_expression_end_pos < remaining_set_part.length()) {
+                QChar ch = remaining_set_part.at(value_expression_end_pos);
+                if (in_string_literal) {
+                    if (ch == string_literal_char) {
+                        // 检查是否是SQL中的两个连续引号表示一个引号的情况 'don''t' or "say ""hello"""
+                        if (value_expression_end_pos + 1 < remaining_set_part.length() && remaining_set_part.at(value_expression_end_pos + 1) == string_literal_char) {
+                            value_expression_end_pos++; // 跳过第二个引号
+                        } else {
+                            in_string_literal = false;
+                        }
+                    }
+                } else {
+                    if (ch == '\'' || ch == '"') {
+                        in_string_literal = true;
+                        string_literal_char = ch;
+                    } else if (ch == '(') {
+                        parentheses_level++;
+                    } else if (ch == ')') {
+                        parentheses_level--;
+                    } else if (ch == ',' && parentheses_level == 0) {
+                        break; // 遇到顶层逗号，当前值表达式结束
+                    }
+                }
+                value_expression_end_pos++;
+            }
+
+            QString valueExpression = remaining_set_part.mid(value_expression_start_pos, value_expression_end_pos - value_expression_start_pos).trimmed();
+            if (valueExpression.isEmpty()) {
+                throw std::runtime_error("SET子句中列 '" + fieldName.toStdString() + "' 的值表达式不能为空。");
+            }
+            qDebug() << "[MainWindow::handleUpdate]   解析到值表达式: '" << valueExpression << "' (for column '" << fieldName << "')";
+
+            // 存储原始的、完整的右侧表达式字符串
+            // QVariant parsedVal = parseLiteralValue(valueExpression); // 不再在这里调用 parseLiteralValue
+            // updates[fieldName] = parsedVal.isNull() ? "NULL" : parsedVal.toString();
+            updates[fieldName] = valueExpression; // xhytable::updateData 将负责解释这个表达式
+
+            current_pos = value_expression_end_pos;
+
+            // 3. 处理逗号分隔符
+            if (current_pos < remaining_set_part.length()) {
+                if (remaining_set_part.at(current_pos) == ',') {
+                    current_pos++; // 跳过逗号
+                    // 跳过逗号后的空格
+                    while(current_pos < remaining_set_part.length() && remaining_set_part.at(current_pos).isSpace()) {
+                        current_pos++;
+                    }
+                    if (current_pos == remaining_set_part.length()) { // 末尾是逗号
+                        throw std::runtime_error("SET子句在末尾有多余的逗号。");
+                    }
+                } else {
+                    // 如果不是逗号也不是字符串末尾，说明格式有问题
+                    throw std::runtime_error("SET子句中多个赋值表达式之间缺少逗号，或在 '" + valueExpression.toStdString() + "' 后存在无法识别的内容: '" + remaining_set_part.mid(current_pos).trimmed().toStdString() + "'");
+                }
+            }
+        } // 结束 while 循环解析 SET 子句
+
+        qDebug() << "[MainWindow::handleUpdate] 完成SET子句解析。Updates map (列名 -> 原始值表达式):" << updates;
+        if (updates.isEmpty() && !set_part_str.trimmed().isEmpty()) {
+            // 这通常意味着整个 set_part_str 无法被解析为任何有效的 "col = val" 对
+            throw std::runtime_error(("无法解析整个SET子句: " + set_part_str).toStdString());
         }
+
 
         ConditionNode conditionRoot;
-        if (!parseWhereClause(where_part, conditionRoot)) { // **Aufruf**
-            if(transactionStartedHere) db_manager.rollbackTransaction();
-            return;
+        if (!parseWhereClause(where_part, conditionRoot)) { // parseWhereClause 内部出错会填充 textBuffer
+            if(transactionStartedHere) {
+                qDebug() << "[MainWindow::handleUpdate] WHERE子句解析失败。回滚数据库事务:" << current_db_name;
+                db_manager.rollbackTransaction(); // 确保回滚
+                textBuffer.append("事务已回滚 (WHERE子句解析失败)。");
+            }
+            return; // 错误信息已由parseWhereClause记录
         }
 
+        // 调用 db_manager.updateData，它会调用 xhytable::updateData
+        // xhytable::updateData 现在会接收到包含完整表达式的 'updates' map
         int affected_rows = db_manager.updateData(current_db_name, table_name, updates, conditionRoot);
-        if (affected_rows >= 0) {
-            if (transactionStartedHere) {
-                if (db_manager.commitTransaction()) {
-                    textBuffer.append(QString("%1 行已更新。").arg(affected_rows));
-                } else {
-                    textBuffer.append("错误：事务提交失败。更改已回滚。");
-                }
+
+        if (transactionStartedHere) {
+            if (db_manager.commitTransaction()) {
+                textBuffer.append(QString("%1 行已更新。事务已提交。").arg(affected_rows));
+                qDebug() << "[MainWindow::handleUpdate] 事务已提交。影响行数:" << affected_rows;
             } else {
-                textBuffer.append(QString("%1 行已更新 (在现有事务中)。").arg(affected_rows));
+                textBuffer.append(QString("错误：更新了 %1 行 (内存中)，但事务提交失败！数据可能未持久化。").arg(affected_rows));
+                qWarning() << "[MainWindow::handleUpdate] 严重: 事务提交失败，但 updateData 报告成功影响 " << affected_rows << " 行。数据库 '" << current_db_name << "' 的表 '" << table_name << "' 数据可能不一致。";
+                // 理论上，如果commit失败，db_manager.commitTransaction()内部应该已经尝试回滚内存中的更改
             }
-        } else {
-            textBuffer.append("错误：更新数据失败。");
-            if(transactionStartedHere) db_manager.rollbackTransaction();
+        } else { // 不在此处启动事务 (可能在外部事务中，或不支持事务)
+            textBuffer.append(QString("%1 行已更新 (在现有事务中或无事务模式下)。").arg(affected_rows));
         }
+
     } catch (const std::runtime_error& e) {
-        if (transactionStartedHere) db_manager.rollbackTransaction();
-        textBuffer.append("更新操作错误: " + QString::fromStdString(e.what()));
+        QString error_message = QString::fromStdString(e.what());
+        qWarning() << "[MainWindow::handleUpdate] 捕获到 runtime_error:" << error_message;
+        if (transactionStartedHere) {
+            db_manager.rollbackTransaction(); // 确保回滚
+            qDebug() << "[MainWindow::handleUpdate] 数据库事务已回滚:" << current_db_name << "错误原因:" << error_message;
+            textBuffer.append(QString("错误: 更新操作失败。原因: %1 (事务已回滚)").arg(error_message));
+        } else {
+            textBuffer.append(QString("错误: 更新操作失败。原因: %1").arg(error_message));
+        }
     } catch (...) {
-        if (transactionStartedHere) db_manager.rollbackTransaction();
-        textBuffer.append("更新操作发生未知错误。");
+        qCritical() << "[MainWindow::handleUpdate] 捕获到未知异常!";
+        if (transactionStartedHere) {
+            db_manager.rollbackTransaction(); // 确保回滚
+            qDebug() << "[MainWindow::handleUpdate] 数据库事务因未知错误已回滚:" << current_db_name;
+            textBuffer.append("更新操作发生未知严重错误。(事务已回滚)");
+        } else {
+            textBuffer.append("更新操作发生未知严重错误。");
+        }
     }
 }
-
 void MainWindow::handleDelete(const QString& command) {
     QString current_db_name = db_manager.get_current_database();
     if (current_db_name.isEmpty()) { textBuffer.append("错误: 未选择数据库。"); return; }
@@ -1335,13 +1469,16 @@ void MainWindow::handleDelete(const QString& command) {
             }
         } else { textBuffer.append("错误：删除数据失败。"); if(transactionStartedHere) db_manager.rollbackTransaction(); }
     } catch (const std::runtime_error& e) {
-        if (transactionStartedHere) db_manager.rollbackTransaction();
-        textBuffer.append("删除操作错误: " + QString::fromStdString(e.what()));
-    } catch (...) {
-        if (transactionStartedHere) db_manager.rollbackTransaction();
-        textBuffer.append("删除操作发生未知错误。");
-    }
-}
+        QString error_message = QString::fromStdString(e.what());
+        qWarning() << "[handleDelete] Caught runtime_error:" << error_message;
+        if (transactionStartedHere) {
+            db_manager.rollbackTransaction();
+            qDebug() << "[handleDelete] Transaction rolled back for database:" << current_db_name << "due to error:" << error_message;
+            textBuffer.append(QString("错误: 删除操作失败。原因: %1 (事务已回滚)").arg(error_message));
+        } else {
+            textBuffer.append(QString("错误: 删除操作失败。原因: %1").arg(error_message));
+        }
+    }}
 
 // by zyh
 void MainWindow::handleSelect(const QString& command) {
@@ -2280,129 +2417,179 @@ xhyfield::datatype MainWindow::parseDataType(const QString& type_str_input, int*
     return xhyfield::VARCHAR;
 }
 
+// mainwindow.cpp 或一个包含此定义的合适位置
+namespace { // 匿名命名空间
+namespace DefaultValueKeywords {
+const QString SQL_NULL = "##SQL_NULL##";
+const QString CURRENT_TIMESTAMP_KW = "##CURRENT_TIMESTAMP##";
+}
+} // 结束匿名命名空间
+
 QStringList MainWindow::parseConstraints(const QString& constraints_str_input) {
     QStringList parsed_constraints_for_xhyfield;
-    QString current_str = constraints_str_input.trimmed();
-    int current_pos = 0;
+    QString current_processing_str = constraints_str_input.trimmed();
+    qDebug() << "[解析约束] 开始处理列约束字符串: '" << constraints_str_input << "'";
 
-    while (current_pos < current_str.length()) {
-        current_str = current_str.mid(current_pos).trimmed();
-        current_pos = 0;
-        if (current_str.isEmpty()) break;
-
-        QString upper_current_str = current_str.toUpper();
-        bool constraint_found_in_iteration = false;
+    while (!current_processing_str.isEmpty()) {
+        QString upper_current_str = current_processing_str.toUpper();
+        bool constraint_found_in_this_iteration = false;
+        int consumed_length_in_iteration = 0;
 
         if (upper_current_str.startsWith("NOT NULL")) {
             parsed_constraints_for_xhyfield.append("NOT_NULL");
-            current_pos = QString("NOT NULL").length();
-            constraint_found_in_iteration = true;
-        }
-        else if (upper_current_str.startsWith("PRIMARY KEY")) {
+            consumed_length_in_iteration = QString("NOT NULL").length();
+            constraint_found_in_this_iteration = true;
+            qDebug() << "  识别约束: NOT NULL";
+        } else if (upper_current_str.startsWith("PRIMARY KEY")) {
             parsed_constraints_for_xhyfield.append("PRIMARY_KEY");
-            current_pos = QString("PRIMARY KEY").length();
-            constraint_found_in_iteration = true;
-        }
-        else if (upper_current_str.startsWith("UNIQUE")) {
+            consumed_length_in_iteration = QString("PRIMARY KEY").length();
+            constraint_found_in_this_iteration = true;
+            qDebug() << "  识别约束: PRIMARY KEY";
+        } else if (upper_current_str.startsWith("UNIQUE")) {
             parsed_constraints_for_xhyfield.append("UNIQUE");
-            current_pos = QString("UNIQUE").length();
-            constraint_found_in_iteration = true;
-        }
-        else if (upper_current_str.startsWith("DEFAULT ")) {
-            parsed_constraints_for_xhyfield.append("DEFAULT");
-            QString default_keyword_part = current_str.left(QString("DEFAULT ").length());
-            QString value_part_candidate = current_str.mid(default_keyword_part.length()).trimmed();
+            consumed_length_in_iteration = QString("UNIQUE").length();
+            constraint_found_in_this_iteration = true;
+            qDebug() << "  识别约束: UNIQUE";
+        } else if (upper_current_str.startsWith("DEFAULT ")) {
+            QString default_keyword_prefix = current_processing_str.left(QString("DEFAULT ").length());
+            QString value_part_candidate = current_processing_str.mid(default_keyword_prefix.length()).trimmed();
+            QString actual_default_value_to_store;
 
-            QRegularExpression re_next_constraint_or_end(
-                // 使用标准字符串，转义 \ 和 "
-                "^\\s*(?:('([^']*(?:''[^']*)*)')|(\"([^\"]*(?:\"\"[^\"]*)*)\")|([^\\s,()]+))(\\s+|$)",
-                QRegularExpression::CaseInsensitiveOption
-                );
-            QRegularExpressionMatch val_match = re_next_constraint_or_end.match(value_part_candidate);
+            consumed_length_in_iteration = default_keyword_prefix.length(); // 先消耗 "DEFAULT "
 
-            if (val_match.hasMatch() && val_match.capturedStart() == 0) {
-                QString actual_default_value_str = val_match.captured(1).trimmed();
-                QVariant parsed_literal = parseLiteralValue(actual_default_value_str);
-
-                QString stored_default_val = parsed_literal.isNull() ? "NULL" : parsed_literal.toString();
-                parsed_constraints_for_xhyfield.append(stored_default_val);
-                current_pos = default_keyword_part.length() + val_match.capturedLength(0);
+            if (value_part_candidate.isEmpty()) {
+                qWarning() << "  警告: DEFAULT 关键字后缺少值定义。";
+                // consumed_length_in_iteration 保持不变，仅消耗了 "DEFAULT "
             } else {
-                qWarning() << "警告: DEFAULT 关键字后未能正确解析默认值：" << value_part_candidate;
-                current_pos = default_keyword_part.length();
+                QRegularExpression keyword_null_re(R"(^(NULL)(?:\s+|,|$))", QRegularExpression::CaseInsensitiveOption);
+                QRegularExpression keyword_ts_re(R"(^(CURRENT_TIMESTAMP)(?:\s+|,|$))", QRegularExpression::CaseInsensitiveOption);
+                QRegularExpression literal_re(R"(^('([^']*(?:''[^']*)*)'|"([^"]*(?:""[^"]*)*)|[\w.+-]+)(?:\s+|,|$))", QRegularExpression::CaseInsensitiveOption);
+                // 注意：上面的 [\w.+-]+ 用于匹配数字和可能的负数、小数，以及 TRUE/FALSE 等无引号标识符。
+                // 如果你的 DEFAULT 值可以是更复杂的表达式，这里的 literal_re 可能需要调整。
+
+                QRegularExpressionMatch match_result;
+
+                if ((match_result = keyword_null_re.match(value_part_candidate)).hasMatch() && match_result.capturedStart() == 0) {
+                    actual_default_value_to_store = DefaultValueKeywords::SQL_NULL;
+                    consumed_length_in_iteration += match_result.capturedLength(1); // 消耗 "NULL"
+                     qDebug() << "  识别 DEFAULT NULL";
+                } else if ((match_result = keyword_ts_re.match(value_part_candidate)).hasMatch() && match_result.capturedStart() == 0) {
+                    actual_default_value_to_store = DefaultValueKeywords::CURRENT_TIMESTAMP_KW;
+                    consumed_length_in_iteration += match_result.capturedLength(1); // 消耗 "CURRENT_TIMESTAMP"
+                    qDebug() << "  识别 DEFAULT CURRENT_TIMESTAMP";
+                } else if ((match_result = literal_re.match(value_part_candidate)).hasMatch() && match_result.capturedStart() == 0) {
+                    QString captured_literal = match_result.captured(1).trimmed();
+                    if ((captured_literal.startsWith('\'') && captured_literal.endsWith('\'')) ||
+                        (captured_literal.startsWith('"') && captured_literal.endsWith('"'))) {
+                        if (captured_literal.length() >= 2) {
+                            actual_default_value_to_store = captured_literal.mid(1, captured_literal.length() - 2);
+                            if (captured_literal.startsWith('\'')) actual_default_value_to_store.replace("''", "'");
+                            else actual_default_value_to_store.replace("\"\"", "\"");
+                        } else {
+                            actual_default_value_to_store = ""; // 例如 DEFAULT ''
+                        }
+                    } else { // 数字, TRUE, FALSE, 或其他无引号字面量
+                        actual_default_value_to_store = captured_literal;
+                    }
+                    consumed_length_in_iteration += match_result.capturedLength(1); // 消耗匹配到的字面量
+                    qDebug() << "  识别 DEFAULT 字面量: '" << actual_default_value_to_store << "'";
+                } else {
+                    qWarning() << "  警告: DEFAULT 关键字后未能正确解析默认值，剩余部分: '" << value_part_candidate << "'";
+                    // 尝试安全地消耗掉无法解析的部分，避免死循环
+                    int next_separator_pos = value_part_candidate.indexOf(QRegularExpression(R"(\s|,|$)"));
+                    if (next_separator_pos != -1) consumed_length_in_iteration += next_separator_pos;
+                    else consumed_length_in_iteration += value_part_candidate.length();
+                    actual_default_value_to_store.clear(); // 解析失败
+                }
             }
-            constraint_found_in_iteration = true;
+
+            if (!actual_default_value_to_store.isNull()) { // 用 isNull() 检查，因为 clear() 后的空字符串也应该能被存储（代表 DEFAULT ''）
+                parsed_constraints_for_xhyfield.append("DEFAULT");
+                parsed_constraints_for_xhyfield.append(actual_default_value_to_store);
+            }
+            constraint_found_in_this_iteration = true;
         }
-        // ** 【核心修改点：处理 CHECK 约束】 **
-        else if (upper_current_str.startsWith("CHECK ")) { // 匹配 "CHECK " (带空格)
-            QString check_keyword_part_original_case = current_str.left(QString("CHECK ").length()); // 保留原始 "CHECK " 的长度
-            QString expr_part_candidate = current_str.mid(check_keyword_part_original_case.length()).trimmed(); // 表达式部分，去除前后空格
+        else if (upper_current_str.startsWith("CHECK ")) {
+            QString check_keyword_part = current_processing_str.left(QString("CHECK ").length());
+            QString expr_part_candidate = current_processing_str.mid(check_keyword_part.length()).trimmed();
+            consumed_length_in_iteration = check_keyword_part.length();
 
             if (expr_part_candidate.startsWith('(')) {
                 int paren_balance = 0;
-                int expr_end_idx = -1; // 括号内表达式在 expr_part_candidate 中的结束索引
-                bool in_check_str_literal = false;
-                QChar check_str_char = ' ';
+                int expr_end_idx = -1;
+                bool in_check_string_literal = false;
+                QChar check_string_char = ' ';
 
                 for (int i = 0; i < expr_part_candidate.length(); ++i) {
                     QChar c = expr_part_candidate.at(i);
                     if (c == '\'' || c == '"') {
-                        if (in_check_str_literal && c == check_str_char) {
-                            if (i > 0 && expr_part_candidate.at(i-1) == '\\') {}
-                            else in_check_str_literal = false;
-                        } else if (!in_check_str_literal) {
-                            in_check_str_literal = true; check_str_char = c;
+                        if (in_check_string_literal && c == check_string_char) {
+                            if (i > 0 && expr_part_candidate.at(i - 1) == '\\') { /* escaped quote */ }
+                            else in_check_string_literal = false;
+                        } else if (!in_check_string_literal) {
+                            in_check_string_literal = true; check_string_char = c;
                         }
-                    } else if (c == '(' && !in_check_str_literal) {
+                    } else if (c == '(' && !in_check_string_literal) {
                         paren_balance++;
-                    } else if (c == ')' && !in_check_str_literal) {
+                    } else if (c == ')' && !in_check_string_literal) {
                         paren_balance--;
-                        if (paren_balance == 0 && i > 0) { // 确保不是空的 ()
-                            expr_end_idx = i; // ')' 的索引
-                            break;
+                        if (paren_balance == 0 && i > 0) {
+                            expr_end_idx = i; break;
                         }
                     }
                 }
 
                 if (expr_end_idx != -1 && paren_balance == 0) {
-                    // 提取括号内的原始表达式，并去除其内部的前后空格
-                    QString raw_expression_in_parens = expr_part_candidate.mid(1, expr_end_idx - 1).trimmed();
-
-                    // 构建规范化的 CHECK 约束字符串: "CHECK(EXPRESSION)"
-                    QString normalized_check_constraint = QString("CHECK(%1)").arg(raw_expression_in_parens);
-
-                    parsed_constraints_for_xhyfield.append(normalized_check_constraint.toUpper()); // 存储为大写的规范格式
-
-                    // 更新 current_pos 以跳过已处理的 "CHECK (expression)" 部分
-                    current_pos = check_keyword_part_original_case.length() + expr_end_idx + 1;
-                        // (expr_end_idx 是在 expr_part_candidate 中的索引，所以 +1 包含 ')' )
+                    QString raw_expression = expr_part_candidate.mid(1, expr_end_idx - 1).trimmed();
+                    if (!raw_expression.isEmpty()) {
+                        // 存储规范格式 "CHECK(EXPRESSION)"，表达式本身大小写保留，关键字转大写
+                        QString normalized_check_constraint = QString("CHECK(%1)").arg(raw_expression);
+                        parsed_constraints_for_xhyfield.append(normalized_check_constraint);
+                        consumed_length_in_iteration += (expr_end_idx + 1); // CHECK (expression)
+                        qDebug() << "  识别 CHECK 约束: " << normalized_check_constraint;
+                    } else {
+                        qWarning() << "  警告: CHECK 约束括号内表达式为空: " << expr_part_candidate;
+                         consumed_length_in_iteration += (expr_end_idx + 1); // 至少消耗掉 CHECK()
+                    }
                 } else {
-                    qWarning() << "警告: CHECK 约束括号不匹配或表达式不完整：" << expr_part_candidate;
-                    current_pos = check_keyword_part_original_case.length(); // 至少消耗 "CHECK "
+                    qWarning() << "  警告: CHECK 约束括号不匹配或表达式不完整: " << expr_part_candidate;
+                    // 安全消耗，避免死循环
+                    int next_sep = expr_part_candidate.indexOf(QRegularExpression(R"(\s|,|$)"));
+                    if (next_sep != -1) consumed_length_in_iteration += next_sep;
+                    else consumed_length_in_iteration += expr_part_candidate.length();
                 }
             } else {
-                qWarning() << "警告: CHECK 关键字后缺少括号表达式：" << expr_part_candidate;
-                current_pos = check_keyword_part_original_case.length(); // 至少消耗 "CHECK "
+                qWarning() << "  警告: CHECK 关键字后缺少括号表达式: " << expr_part_candidate;
+                 // 安全消耗
+                int next_sep = expr_part_candidate.indexOf(QRegularExpression(R"(\s|,|$)"));
+                if (next_sep != -1) consumed_length_in_iteration += next_sep;
+                else consumed_length_in_iteration += expr_part_candidate.length();
             }
-            constraint_found_in_iteration = true;
+            constraint_found_in_this_iteration = true;
         }
-        // ** 【CHECK 约束处理结束】 **
 
-        if (!constraint_found_in_iteration && !current_str.isEmpty()) {
-            int next_space = current_str.indexOf(' ');
-            QString unknown_token = (next_space == -1) ? current_str : current_str.left(next_space);
-            qWarning() << "警告: 在列约束字符串中遇到未知或格式错误的标记：" << unknown_token;
-            current_pos = unknown_token.length();
-            if (current_pos == 0) current_pos = current_str.length();
+        if (!constraint_found_in_this_iteration && !current_processing_str.isEmpty()) {
+            int next_space_or_comma = current_processing_str.indexOf(QRegularExpression(R"(\s|,)"));
+            QString unknown_token = (next_space_or_comma == -1) ? current_processing_str : current_processing_str.left(next_space_or_comma);
+            qWarning() << "  警告: 在列约束字符串中遇到未知或格式错误的标记: '" << unknown_token << "'";
+            consumed_length_in_iteration = unknown_token.length();
+            if (consumed_length_in_iteration == 0) { // 如果未知标记是空的，则消耗整个剩余字符串以避免死循环
+                 qWarning() << "    [解析约束] 未知标记为空，但字符串非空，强制消耗剩余部分以防死循环: " << current_processing_str;
+                consumed_length_in_iteration = current_processing_str.length();
+            }
         }
-        if (current_pos == 0 && !current_str.isEmpty()) {
-            qWarning() << "错误：parseConstraints 可能进入死循环，当前字符串：" << current_str;
+
+        if (consumed_length_in_iteration == 0 && !current_processing_str.isEmpty()) {
+            // 如果在一次迭代中没有消耗任何字符，但字符串仍然不为空，
+            // 这可能意味着解析逻辑卡住了，强制跳出以避免无限循环。
+            qWarning() << "错误: parseConstraints 可能进入死循环，当前未处理的字符串部分: '" << current_processing_str << "'。提前终止此列的约束解析。";
             break;
         }
+        current_processing_str = current_processing_str.mid(consumed_length_in_iteration).trimmed();
     }
+    qDebug() << "[解析约束] 完成，解析得到的约束列表: " << parsed_constraints_for_xhyfield;
     return parsed_constraints_for_xhyfield;
 }
-
 
 bool MainWindow::validateCheckExpression(const QString& expression) {
     // 简确保括号匹配
@@ -2590,8 +2777,7 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
         textBuffer.append(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
-    xhytable* table = db->find_table(table_name); // 修改为非 const 指针以调用非 const 方法 defaultValues() 和 foreignKeys()
-
+    xhytable* table = db->find_table(table_name); // 需要非 const 指针
 
     if (!table) {
         textBuffer.append(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
@@ -2599,7 +2785,7 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
     }
     QString output = QString("表 '%1.%2' 的结构:\n").arg(db_name, table_name);
     output += QString("%1\t%2\t%3\n").arg("列名", -20).arg("类型", -20).arg("约束");
-    output += QString(80, '-') + "\n"; // 增加分隔符长度以适应更长的约束字符串
+    output += QString(80, '-') + "\n";
 
     const QMap<QString, QString>& default_values_map = table->defaultValues();
     const QStringList& primary_keys_list = table->primaryKeys();
@@ -2607,68 +2793,139 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
 
     for (const auto& field : table->fields()) {
         QStringList display_constraints_for_field;
+        const QStringList& raw_field_constraints = field.constraints();
 
-        // 1. 从字段对象获取原始约束 (例如 CHECK, UNIQUE(列级), SIZE, PRECISION, SCALE)
-        display_constraints_for_field.append(field.constraints());
+        // 1. 从字段对象的 m_constraints 获取固有约束。
+        //    关键修改：正确跳过 "DEFAULT" 关键字及其后的原始值。
+        for (int i = 0; i < raw_field_constraints.size(); ++i) {
+            const QString& constr_str = raw_field_constraints.at(i);
 
-        // 2. 处理主键约束标记
-        if (primary_keys_list.contains(field.name(), Qt::CaseInsensitive)) {
-            // 如果是主键成员，确保 PRIMARY_KEY 和 NOT_NULL 标记存在
+            if (constr_str.compare("DEFAULT", Qt::CaseInsensitive) == 0) {
+                // 当遇到 "DEFAULT" 关键字时，它的下一个元素是原始默认值字符串。
+                // 我们需要跳过这两个元素，因为默认值将从 default_values_map 中统一处理。
+                i++; // 跳过原始默认值字符串 (循环的下一次迭代会处理 i 的正确自增)
+                continue; // 跳过 "DEFAULT" 关键字本身
+            }
+            // 将其他非 "DEFAULT" 也非其值的约束添加到显示列表
+            display_constraints_for_field.append(constr_str);
+        }
+
+        // 2. 处理主键标记和 NOT NULL 约束
+        bool is_primary_key = primary_keys_list.contains(field.name(), Qt::CaseInsensitive);
+        bool is_not_null_from_set = not_null_fields_set.contains(field.name()); // 从集合中检查是否NOT NULL
+
+        if (is_primary_key) {
+            // Prepend "PRIMARY_KEY" if not already added (e.g., from a table-level constraint in raw_field_constraints)
             if (!display_constraints_for_field.contains("PRIMARY_KEY", Qt::CaseInsensitive)) {
-                display_constraints_for_field.prepend("PRIMARY_KEY"); // 放在前面，更显眼
+                // It's possible PRIMARY_KEY was already added if it came from a table-level constraint parsed into field.constraints()
+                // However, typical field-level PK is just "PRIMARY KEY", not from table.add_primary_key to field.constraints()
+                // For safety and clarity, let's assume field.constraints() for field-level PK might not have it,
+                // or table->primaryKeys() is the canonical source.
+                // We will rely on table->primaryKeys() to add it to the display.
             }
-            // 主键列必然非空。如果m_notNullFields不包含它（例如表级PK未更新m_notNullFields），也应显示NOT_NULL
-            if (!not_null_fields_set.contains(field.name()) && !display_constraints_for_field.contains("NOT_NULL", Qt::CaseInsensitive)) {
-                display_constraints_for_field.append("NOT_NULL");
-            }
+            display_constraints_for_field.prepend("PRIMARY_KEY"); // 主键总是优先显示
+            is_not_null_from_set = true; // 主键列隐含非空
         }
 
-        // 3. 处理明确的 NOT NULL 约束 (如果不是主键但有NOT NULL)
-        if (not_null_fields_set.contains(field.name())) {
-            if (!display_constraints_for_field.contains("NOT_NULL", Qt::CaseInsensitive) &&
-                !primary_keys_list.contains(field.name(), Qt::CaseInsensitive)) { // 避免重复添加NOT_NULL
-                display_constraints_for_field.append("NOT_NULL");
-            }
-        }
-
-        // 4. 处理默认值
-        if (default_values_map.contains(field.name())) {
-            // 避免重复添加 DEFAULT (如果 field.constraints() 中已包含)
-            // 简单的检查方法是查看是否已经有以 "DEFAULT " 开头的约束
-            bool defaultExists = false;
-            for(const QString& constr : display_constraints_for_field) {
-                if (constr.startsWith("DEFAULT ", Qt::CaseInsensitive)) {
-                    defaultExists = true;
+        // 统一添加NOT NULL (如果它是主键，或在not_null_fields_set中)
+        if (is_not_null_from_set) {
+            bool already_displayed_not_null = false;
+            for (const QString& displayed_constr : display_constraints_for_field) {
+                if (displayed_constr.compare("NOT_NULL", Qt::CaseInsensitive) == 0) {
+                    already_displayed_not_null = true;
                     break;
                 }
             }
-            if (!defaultExists) {
-                display_constraints_for_field.append("DEFAULT " + default_values_map.value(field.name()));
+            if (!already_displayed_not_null) {
+                display_constraints_for_field.append("NOT_NULL");
             }
         }
 
-        // 移除可能因上述逻辑引入的重复项 (例如 "NOT_NULL" 可能来自 field.constraints() 和 m_notNullFields)
+        // 3. 处理默认值，从 xhytable::m_defaultValues 获取 (这部分逻辑是正确的)
+        if (default_values_map.contains(field.name())) {
+            QString storedDefault = default_values_map.value(field.name());
+            QString displayDefault;
+
+            // 使用实际字符串进行比较，以防 DefaultValueKeywords 未在此处定义
+            if (storedDefault == "##SQL_NULL##") {
+                displayDefault = "DEFAULT NULL";
+            } else if (storedDefault == "##CURRENT_TIMESTAMP##") {
+                displayDefault = "DEFAULT CURRENT_TIMESTAMP";
+            } else { // 普通字面量
+                // 检查是否是数字或布尔值，以决定是否加引号
+                bool isNumericOrBool = false;
+                bool okNum;
+                storedDefault.toDouble(&okNum); // 尝试转换为double
+                if (okNum) {
+                    isNumericOrBool = true;
+                } else if (storedDefault.compare("true", Qt::CaseInsensitive) == 0 ||
+                           storedDefault.compare("false", Qt::CaseInsensitive) == 0) {
+                    isNumericOrBool = true;
+                }
+
+                const xhyfield* f_def = table->get_field(field.name()); // 获取字段定义
+                if (f_def) { // 根据字段类型决定是否加引号
+                    switch(f_def->type()) {
+                    case xhyfield::CHAR:
+                    case xhyfield::VARCHAR:
+                    case xhyfield::TEXT:
+                    case xhyfield::ENUM:
+                    case xhyfield::DATE:
+                    case xhyfield::DATETIME:
+                    case xhyfield::TIMESTAMP:
+                        displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'"; // SQL转义单引号
+                        break;
+                    default: // INT, BOOL, DECIMAL, FLOAT, DOUBLE etc.
+                        displayDefault = "DEFAULT " + storedDefault;
+                        break;
+                    }
+                } else {
+                    // 无法获取字段定义，作为一种回退策略：
+                    // 如果它看起来像数字或布尔值，则不加引号，否则加引号
+                    if (isNumericOrBool) {
+                        displayDefault = "DEFAULT " + storedDefault;
+                    } else {
+                        displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
+                    }
+                }
+            }
+            display_constraints_for_field.append(displayDefault);
+        }
+
+        // 清理可能因为不同来源（如字段级 vs 表级约束）导致的重复约束显示，例如 "NOT_NULL"
+        // 虽然上面的逻辑试图避免，但作为最后一道防线。
+        // 尤其是 CHECK 约束，如果字段级 CHECK(expr) 和表级同名 CHECK(expr) 都被解析并存入，
+        // 确保 xhyfield 的 constraints 和 xhytable 的 checkConstraints 之间如何协调。
+        // 假设这里的 removeDuplicates 是有效的。
         display_constraints_for_field.removeDuplicates();
 
 
+        // 构建最终输出行
+        // field.typestring() 应该返回已经包含长度/精度/标度的完整类型字符串，
+        // 例如 "VARCHAR(100)", "DECIMAL(10,2)", "ENUM('A','B')"
+        // 如果 field.constraints() 中还包含如 "SIZE(100)", "PRECISION(10)", "SCALE(2)"
+        // 那么它们不应该再被单独添加到 display_constraints_for_field 中，
+        // 除非 typestring() 只返回基础类型如 "VARCHAR", "DECIMAL"。
+        // 从您的输出看，类型如 "VARCHAR(100)" 后面还跟着 "SIZE(100)"，这有点冗余。
+        // 理想情况下，SIZE/PRECISION/SCALE 应该被整合到 typestring() 中，或者从 display_constraints_for_field 中移除。
+        // 为保持与您当前输出格式最接近（除了修复默认值问题），我们暂时不改变这部分。
         output += QString("%1\t%2\t%3\n")
                       .arg(field.name(), -20)
-                      .arg(field.typestring(), -20) // typestring() 已包含如 VARCHAR(100), DECIMAL(10,2)
+                      .arg(field.typestring(), -20)
                       .arg(display_constraints_for_field.join(" "));
     }
 
-    // 显示表级主键信息 (已有的逻辑)
+    // 显示表级主键信息
     if (!primary_keys_list.isEmpty()) {
         output += "\nPRIMARY KEY: (" + primary_keys_list.join(", ") + ")\n";
     }
 
-    // ***** 新增：显示外键信息 *****
+    // 显示外键信息
     const QList<ForeignKeyDefinition>& foreign_keys_list = table->foreignKeys();
     if (!foreign_keys_list.isEmpty()) {
         output += "\nFOREIGN KEYS:\n";
         for (const auto& fkDef : foreign_keys_list) {
             QStringList childCols, parentCols;
-
             for (auto it = fkDef.columnMappings.constBegin(); it != fkDef.columnMappings.constEnd(); ++it) {
                 childCols.append(it.key());
                 parentCols.append(it.value());
@@ -2680,12 +2937,31 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
                           .arg(parentCols.join(", "));
         }
     }
-    // ***** 结束新增外键信息 *****
+
+    // 显示 CHECK 约束信息 (从表级约束获取)
     const QMap<QString, QString>& check_constraints_map = table->checkConstraints();
     if (!check_constraints_map.isEmpty()) {
-        output += "\nCHECK CONSTRAINTS:\n"; // 添加一个清晰的标题
+        output += "\nCHECK CONSTRAINTS:\n";
         for (auto it = check_constraints_map.constBegin(); it != check_constraints_map.constEnd(); ++it) {
-            // it.key() 是约束名, it.value() 是约束表达式
+            // 检查这个CHECK约束是否已经在字段级别被显示过了（如果CHECK表达式直接来自字段定义并被加入 field.constraints()）
+            // 这是一个复杂点，取决于您的CHECK约束是如何存储和关联的。
+            // 假设表级的m_checkConstraints是权威来源，或者没有字段级CHECK被直接加入display_constraints_for_field
+            bool already_shown_as_field_check = false;
+            QString check_expr_for_map = QString("CHECK(%1)").arg(it.value()); // 构建与字段约束中可能存在的格式一致的字符串
+            for(const auto& field_obj : table->fields()){
+                for(const QString& field_constr : field_obj.constraints()){
+                    // 字段级的CHECK约束通常会是 CHECK(表达式) 的形式
+                    if(field_constr.compare(check_expr_for_map, Qt::CaseInsensitive) == 0) {
+                        // 这里假设如果字段约束里已经有了这个CHECK表达式，就不再从表级重复显示。
+                        // 但这可能不完全准确，因为字段级CHECK可能没有名字，而表级有。
+                        // 更稳妥的做法是，如果您的 xhyfield::constraints() 不包含由 xhytable::m_checkConstraints 产生的 CHECK，
+                        // 那么这里的显示就是正确的。
+                        // 从您的DESCRIBE输出看，CHECK约束是单独列出的，说明它们是从 m_checkConstraints 来的。
+                        // 因此，这里直接显示 m_checkConstraints 的内容是合理的。
+                    }
+                }
+            }
+            // 如果不进行上述检查，或者检查逻辑不适用，则直接显示：
             output += QString("  CONSTRAINT %1 CHECK (%2)\n")
                           .arg(it.key())
                           .arg(it.value());
@@ -2693,6 +2969,14 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
     }
     textBuffer.append(output.trimmed());
 }
+
+
+
+
+
+
+
+
 
 
 // ENDE von mainwindow.cpp

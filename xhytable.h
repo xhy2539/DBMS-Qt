@@ -80,8 +80,8 @@ public:
 
     // 验证方法
     //约束检查
-    bool checkInsertConstraints(const QMap<QString, QString>& fieldValues) const;
-    bool checkUpdateConstraints(const QMap<QString, QString>& updates, const ConditionNode & conditions) const;
+    void checkInsertConstraints(const QMap<QString, QString>& fieldValues) const;
+    void checkUpdateConstraints(const xhyrecord& originalRecord, const QMap<QString, QString>& finalProposedUpdates) const ;
     bool checkDeleteConstraints(const ConditionNode & conditions) const;
     bool evaluateCheckExpression(const QString& expr, const QVariantMap& fieldValues) const;//check 语句解析
     QVariant convertStringToType(const QString& str, xhyfield::datatype type) const ;//类型转换
@@ -118,6 +118,7 @@ public:
     QList<xhyrecord> m_tempRecords; // 事务期间的临时记录
 
     xhydatabase* m_parentDb; // 指向所属数据库的指针
+
 };
 
 #endif // XHYTABLE_H

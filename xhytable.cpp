@@ -116,17 +116,16 @@ void xhytable::addfield(const xhyfield& field) {
     //解析check
 
     // 检查是否以 "check" 开头
-    QString s;
-    if(!field.constraints().empty())
-     s= field.constraints().first();
-    if (s.startsWith("check")||s.startsWith("CHECK")) {
+
+    for (const QString& constraint : field.constraints()) {
+    if (constraint.startsWith("check")||constraint.startsWith("CHECK")) {
         // 查找 '(' 和 ')' 的位置
-        int start = s.indexOf('(') + 1;
-        int end = s.size()-1;
+        int start = constraint.indexOf('(') + 1;
+        int end = constraint.size()-1;
         QString content;
         if (start > 0 && end > start) {  // 确保找到括号
             // 提取括号内的内容
-            content = s.mid(start, end - start);
+            content = constraint.mid(start, end - start);
 
             // 去除前后空格（使用Qt的trimmed()方法）
             content = content.trimmed();
@@ -136,7 +135,7 @@ void xhytable::addfield(const xhyfield& field) {
             qDebug() << "No valid parentheses found";
         }
     }
-
+    }
 
     m_fields.append(newField);
 }

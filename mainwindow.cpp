@@ -1229,7 +1229,6 @@ QPair<int, QString> MainWindow::findLowestPrecedenceOperator(const QString& expr
     return {bestOpPos, bestOpFound};
 }
 
-// MainWindow::parseSubExpression 的实现
 ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
     QString expression = expressionView.toString().trimmed();
     // Keep the initial qDebug for the overall expression
@@ -1288,26 +1287,52 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
     }
 
     // zyh在这里加了这样一段，然后就可以处理BETWEEN ... AND ...语句了
-    if (expression.contains("BETWEEN", Qt::CaseInsensitive)) {
-        // 解析 BETWEEN ... AND ...
-        QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption);
+    // 注意：这段代码可能与下面的通用 BETWEEN/NOT BETWEEN 比较操作符重复。
+    // 如果下面的通用操作符能正确处理，这段可以考虑移除或整合。
+    // 为保持您原始结构，暂时保留。
+    if (expression.contains("BETWEEN", Qt::CaseInsensitive) && !expression.toUpper().contains("NOT BETWEEN")) { // 更精确地避免匹配 NOT BETWEEN
+        QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
         QRegularExpressionMatch match = betweenRegex.match(expression);
 
         if (match.hasMatch()) {
-            QString field = match.captured(1).trimmed();
-            QString value1 = match.captured(2).trimmed();
-            QString value2 = match.captured(3).trimmed();
+            // 需要确保此处的BETWEEN不会与下面比较操作符循环中的BETWEEN冲突或被错误地优先处理。
+            // 一个更稳健的方法是让所有比较操作符（包括BETWEEN）都在一个统一的优先级/解析流程中。
+            // 但如果此处的特殊处理是针对某种特定情况，请确保其逻辑正确。
+            // 检查此处的 BETWEEN 是否比 AND/OR 优先级高。如果是，则此位置可能正确。
 
-            node.type = ConditionNode::COMPARISON_OP;
-            node.comparison.fieldName = field;
-            node.comparison.operation = "BETWEEN";
-            node.comparison.value = parseLiteralValue(value1);
-            node.comparison.value2 = parseLiteralValue(value2);
+            // 检查是否是顶层 BETWEEN (不是被 AND/OR 分割的子句)
+            bool isTopLevelBetween = true;
+            int parenLevel = 0;
+            QString exprBeforeBetween = match.captured(1);
+            for(QChar c : exprBeforeBetween) { // 检查BETWEEN左边是否有未闭合的括号或更高优先级的AND/OR
+                if(c == '(') parenLevel++;
+                else if(c == ')') parenLevel--;
+            }
+            // 这个检查很简单，可能不够全面。findLowestPrecedenceOperator 更好。
+            // 如果 findLowestPrecedenceOperator 找到了AND/OR，则不应该在这里处理 BETWEEN。
+            QPair<int, QString> opDetailsForBetweenCheck = findLowestPrecedenceOperator(expression, {"OR", "AND"});
+            if (opDetailsForBetweenCheck.first != -1) { // 如果存在更高优先级的AND/OR
+                isTopLevelBetween = false;
+            }
 
-            qDebug() << "Parsed BETWEEN: Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
-            return node;
+
+            if (isTopLevelBetween) {
+                QString field = match.captured(1).trimmed();
+                QString value1 = match.captured(2).trimmed();
+                QString value2 = match.captured(3).trimmed();
+
+                node.type = ConditionNode::COMPARISON_OP;
+                node.comparison.fieldName = field; // field 可能也需要支持 alias.column
+                node.comparison.operation = "BETWEEN";
+                node.comparison.value = parseLiteralValue(value1);
+                node.comparison.value2 = parseLiteralValue(value2);
+
+                qDebug() << "Parsed BETWEEN (special handling): Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
+                return node;
+            }
         }
     }
+
 
     // 3. 处理逻辑运算符 OR, AND ... (这部分代码与您之前提供的版本相同，保持不变)
     QPair<int, QString> opDetails = findLowestPrecedenceOperator(expression, {"OR", "AND"});
@@ -1328,39 +1353,42 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
 
     // 4. 处理比较运算符
     const QList<QString> comparisonOps = {
-        "IS NOT NULL", "IS NULL",
-        "NOT BETWEEN", "BETWEEN",
+        "IS NOT NULL", "IS NULL",    // 一元操作符，通常优先级较高或特殊处理
+        "NOT BETWEEN", "BETWEEN",    // 三元操作符 (field BETWEEN val1 AND val2)
         "NOT LIKE", "LIKE",
         "NOT IN", "IN",
-        ">=", "<=", "<>", "!=", "=", ">", "<"
+        ">=", "<=", "<>", "!=", "=", ">", "<" // 二元操作符
     };
 
     for (const QString& op_from_list : comparisonOps) {
         QRegularExpression compRe;
         QString patternStr;
-        QString fieldNamePattern = R"(([\w_][\w\d_]*|`[^`]+`|\[[^\]]+\]))";
+
+        // ==================== MODIFICATION START ====================
+        // 修改 fieldNamePattern 以支持 alias.column 和 quoted versions
+        // 原来的: QString fieldNamePattern = R"(([\w_][\w\d_]*|`[^`]+`|\[[^\]]+\]))";
+        QString fieldNamePattern = R"((`[^`]+`(?:\.`[^`]+`)?|\[[^\]]+\](?:\.\[[^\]]+\])?|[\w_]+(?:\.[\w_]+)?))";
+        // 这个模式的含义:
+        // 1. `[^`]+`(?:\.`[^`]+`)?     : `table`.`column` 或 `column` (反引号包裹)
+        // 2. \[[^\]]+\](?:\.\[[^\]]+\])? : [table].[column] 或 [column] (方括号包裹)
+        // 3. [\w_]+(?:\.[\w_]+)?         : table.column 或 column (无引号)
+        // ===================== MODIFICATION END =====================
+
         QString escaped_op = QRegularExpression::escape(op_from_list);
         QString operator_pattern_segment;
 
-        // 为特定关键字操作符添加单词边界 \b
-        // IS NULL, IS NOT NULL, BETWEEN, NOT BETWEEN 是多词操作符，它们的模式已经通过空格自然形成了边界
         if (op_from_list == "IN" || op_from_list == "NOT IN" ||
             op_from_list == "LIKE" || op_from_list == "NOT LIKE") {
             operator_pattern_segment = QString(R"(\b(%1)\b)").arg(escaped_op);
         } else {
-            // 对于 "IS NULL", "IS NOT NULL", "BETWEEN", "NOT BETWEEN" 以及符号操作符
-            // 不需要额外的 \b, 因为它们要么是多词本身就由空格分隔，要么是符号。
             operator_pattern_segment = QString("(%1)").arg(escaped_op);
         }
 
-        // 构建完整的正则表达式模式
         if (op_from_list.compare("IS NULL", Qt::CaseInsensitive) == 0 || op_from_list.compare("IS NOT NULL", Qt::CaseInsensitive) == 0) {
-            // 对于 IS NULL/IS NOT NULL, operator_pattern_segment 已经是 "IS NULL" 或 "IS NOT NULL"
             patternStr = QString(R"(^\s*%1\s+%2\s*$)").arg(fieldNamePattern).arg(operator_pattern_segment);
         } else if (op_from_list.compare("BETWEEN", Qt::CaseInsensitive) == 0 || op_from_list.compare("NOT BETWEEN", Qt::CaseInsensitive) == 0) {
-            // operator_pattern_segment 是 "BETWEEN" 或 "NOT BETWEEN"
-            patternStr = QString(R"(^\s*%1\s*%2\s*(.+?)\s+AND\s+(.+?)\s*$)").arg(fieldNamePattern).arg(operator_pattern_segment);
-        } else { // 适用于 IN, LIKE, =, >, < 等其他需要右操作数的二元操作符
+            patternStr = QString(R"(^\s*%1\s+%2\s*(.+?)\s+AND\s+(.+?)\s*$)").arg(fieldNamePattern).arg(operator_pattern_segment); // Note: operator_pattern_segment already contains BETWEEN/NOT BETWEEN
+        } else {
             patternStr = QString(R"(^\s*%1\s*%2\s*(.+)\s*$)").arg(fieldNamePattern).arg(operator_pattern_segment);
         }
 
@@ -1369,14 +1397,14 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         QRegularExpressionMatch match = compRe.match(expression);
 
         if (match.hasMatch()) {
-            // 还原详细的 qDebug 输出，以帮助调试（如果问题仍然存在）
             qDebug() << "[parseSubExpression][COMPARISON] Matched op_from_list: '" << op_from_list
                      << "' with pattern: '" << patternStr
                      << "' on expression: '" << expression << "'";
 
             node.type = ConditionNode::COMPARISON_OP;
+            // match.captured(1) 现在应该能捕获如 "D.DepartmentName" 或 "DepartmentName"
             node.comparison.fieldName = match.captured(1).trimmed();
-            node.comparison.operation = op_from_list.toUpper();
+            node.comparison.operation = op_from_list.toUpper(); // 使用原始列表中的操作符，已是正确的大小写或形式
 
             qDebug() << "  [COMPARISON] Field from regex: '" << node.comparison.fieldName
                      << "', Operation set to: '" << node.comparison.operation << "'";
@@ -1384,13 +1412,18 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
             //     qDebug() << "    [COMPARISON] Regex Capture Group " << capIdx << ": '" << match.captured(capIdx) << "'";
             // }
 
-
             if (node.comparison.operation == "IS NULL" || node.comparison.operation == "IS NOT NULL") {
                 qDebug() << "    [COMPARISON] Branch: IS NULL / IS NOT NULL";
+                // No value part to parse for these
             } else if (node.comparison.operation == "BETWEEN" || node.comparison.operation == "NOT BETWEEN") {
                 qDebug() << "    [COMPARISON] Branch: BETWEEN / NOT BETWEEN";
-                QString val1Str = match.captured(3).trimmed();
-                QString val2Str = match.captured(4).trimmed();
+                // For "field BETWEEN val1 AND val2", regex captured groups are:
+                // 1: fieldName (from fieldNamePattern)
+                // 2: operator ("BETWEEN" or "NOT BETWEEN") (from operator_pattern_segment)
+                // 3: val1
+                // 4: val2
+                QString val1Str = match.captured(3).trimmed(); // Value1
+                QString val2Str = match.captured(4).trimmed(); // Value2
                 node.comparison.value = parseLiteralValue(val1Str);
                 node.comparison.value2 = parseLiteralValue(val2Str);
                 qDebug() << "      Values: Value1=" << node.comparison.value
@@ -1398,29 +1431,40 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
                          << " (Raw: '" << val2Str << "')";
             } else if (node.comparison.operation == "IN" || node.comparison.operation == "NOT IN") {
                 qDebug() << "    [COMPARISON] Branch: IN / NOT IN";
-                QString valueListPart = match.captured(3).trimmed();
-                qDebug() << "      valueListPart (raw from capture group 3): '" << valueListPart << "'";
-                if (!valueListPart.startsWith('(') || !valueListPart.endsWith(')')) {
-                    throw std::runtime_error("IN 子句的值必须用括号括起来。 Got: " + valueListPart.toStdString());
+                // For "field IN (list)", regex captured groups are:
+                // 1: fieldName
+                // 2: operator ("IN" or "NOT IN")
+                // 3: value list part including parentheses, e.g., "(val1, val2)" or "('a', 'b')"
+                QString valueListPartWithParens = match.captured(3).trimmed();
+                qDebug() << "      valueListPart (raw from capture group 3 for IN/NOT IN): '" << valueListPartWithParens << "'";
+                if (!valueListPartWithParens.startsWith('(') || !valueListPartWithParens.endsWith(')')) {
+                    throw std::runtime_error("IN 子句的值必须用括号括起来。 Got: " + valueListPartWithParens.toStdString());
                 }
-                QString innerValues = valueListPart.mid(1, valueListPart.length() - 2).trimmed();
+                QString innerValues = valueListPartWithParens.mid(1, valueListPartWithParens.length() - 2).trimmed();
                 if (innerValues.isEmpty()) {
                     throw std::runtime_error("IN 子句的值列表不能为空 (例如 IN () )");
                 }
-                QStringList valuesStr = parseSqlValues(innerValues);
+                QStringList valuesStr = parseSqlValues(innerValues); // parseSqlValues should handle parsing 'val1','val2',...
                 for(const QString& valStr : valuesStr) {
-                    if (!valStr.trimmed().isEmpty()) {
+                    if (!valStr.trimmed().isEmpty()) { // Ensure non-empty strings from parseSqlValues
                         node.comparison.valueList.append(parseLiteralValue(valStr.trimmed()));
                     }
                 }
-                if (node.comparison.valueList.isEmpty()) {
-                    throw std::runtime_error("IN 子句的值列表解析后为空或格式错误。 (Inner: " + innerValues.toStdString() + ")");
+                if (node.comparison.valueList.isEmpty() && !valuesStr.isEmpty()) { // If parseSqlValues returned items but they all became empty QVariants
+                     throw std::runtime_error("IN 子句的值列表解析后为空或格式错误。 (Inner: " + innerValues.toStdString() + ")");
+                } else if (node.comparison.valueList.isEmpty() && valuesStr.isEmpty() && !innerValues.isEmpty()){ // parseSqlValues returned nothing from non-empty input
+                    throw std::runtime_error("IN 子句的值列表解析失败或格式错误。 (Inner: " + innerValues.toStdString() + ")");
                 }
+
                 qDebug() << "      IN/NOT IN values parsed:" << node.comparison.valueList;
-            } else {
+            } else { // Standard binary operators like =, >, LIKE etc.
                 qDebug() << "    [COMPARISON] Branch: Other binary operators (e.g., LIKE, =, >, <)";
+                // For "field op value", regex captured groups are:
+                // 1: fieldName
+                // 2: operator
+                // 3: value part
                 QString valuePart = match.captured(3).trimmed();
-                qDebug() << "      valuePart (raw from capture group 3): '" << valuePart << "'";
+                qDebug() << "      valuePart (raw from capture group 3 for other ops): '" << valuePart << "'";
                 node.comparison.value = parseLiteralValue(valuePart);
                 qDebug() << "      Parsed value: " << node.comparison.value;
             }
@@ -1757,9 +1801,9 @@ void MainWindow::handleSelect(const QString& command) {
     // 正则表达式考虑了可选的AS和可能的` 或 [] 包围的标识符
     // ON 条件中的列名也允许用 ` 或 [] 包围，并且可以带点号
     QRegularExpression join_re(
-        R"(^SELECT\s+(.+?)\s+FROM\s+([\w_`\[\]]+)(?:\s+AS\s+([\w_`\[\]]+))?\s+JOIN\s+([\w_`\[\]]+)(?:\s+AS\s+([\w_`\[\]]+))?\s+ON\s+([\w\d_`\[\]\.]+)\s*=\s*([\w\d_`\[\]\.]+)(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY\s+((?:[\w\d_`\[\]\.]+\s*(?:ASC|DESC)?\s*,?\s*)+))?(?:\s+LIMIT\s+(\d+))?\s*;?$)",
-        QRegularExpression::CaseInsensitiveOption
-        );
+           R"(^SELECT\s+(.+?)\s+FROM\s+([\w_`\[\]]+)(?:\s+AS\s+([\w_`\[\]]+))?\s+(?:INNER\s+)?JOIN\s+([\w_`\[\]]+)(?:\s+AS\s+([\w_`\[\]]+))?\s+ON\s+([\w\d_`\[\]\.]+)\s*=\s*([\w\d_`\[\]\.]+)(?:\s+WHERE\s+(.+?))?(?:\s+ORDER\s+BY\s+((?:[\w\d_`\[\]\.]+\s*(?:ASC|DESC)?\s*,?\s*)+))?(?:\s+LIMIT\s+(\d+))?\s*;?$)",
+           QRegularExpression::CaseInsensitiveOption
+       );
     QRegularExpressionMatch join_match = join_re.match(trimmedCommand);
 
     if (join_match.hasMatch()) {

@@ -885,6 +885,9 @@ void xhydbmanager::load_databases_from_files() {
     } // 数据库目录循环结束
     qInfo() << "[LOAD_DB] 所有数据库和表的加载过程完成。";
 }
+
+
+
 xhydatabase* xhydbmanager::find_database(const QString& dbname) {
     for (auto& db : m_databases) {
         if (db.name().toLower() == dbname.toLower()) {

@@ -60,8 +60,28 @@ public:
     xhyfield::datatype parseDataType(const QString& type_str, int* size = nullptr);
     QStringList parseConstraints(const QString& constraints_str_input); // 参数名修改
     void handleTableConstraint(const QString &constraint_str, xhytable &table);
+    // 新增的辅助函数，用于从合并记录中获取字段的原始类型
+    xhyfield::datatype getFieldTypeFromJoinedRecord(
+        const QString& columnNameOrAlias, // WHERE 或 ORDER BY 中使用的列名/别名
+        const xhyrecord& joinedRecord,    // 合并后的记录
+        xhytable* table1,                 // 指向表1的指针
+        const QString& table1DisplayName, // 表1的显示名称 (可能是别名)
+        xhytable* table2,                 // 指向表2的指针
+        const QString& table2DisplayName  // 表2的显示名称 (可能是别名)
+        );
 
+    // 新增的条件匹配函数，专门用于 JOIN 后的记录
+    bool matchJoinedRecordConditions(
+        const xhyrecord& joinedRecord,    // 合并后的记录
+        const ConditionNode& condition,   // 条件节点
+        xhytable* table1,                 // 指向表1的指针 (用于类型转换和比较方法)
+        const QString& table1DisplayName, // 表1的显示名称
+        xhytable* table2,                 // 指向表2的指针
+        const QString& table2DisplayName  // 表2的显示名称
+        );
     QPair<int, QString> findLowestPrecedenceOperator(const QString &expr, const QStringList &operatorsInPrecedenceOrder);
+
+    QPair<QString, QString> parseQualifiedColumn(const QString &qualifiedName);
 private slots:
     // void on_run_clicked();
     void on_addQuery_released();
@@ -99,6 +119,15 @@ private:
     ComparisonDetails parseComparisonDetails(const QString& field, const QString& op, const QString& valuePart);
     //check 条件括号匹配
     bool validateCheckExpression(const QString& expression);
+    QString cleanIdentifier(QString id) const; // 如果已添加，确保为 const
+
+    QPair<QString, QString> parseQualifiedColumn(const QString& qualifiedName) const; // 添加 const
+
+
+    QString sqlLikeToRegex(const QString& likePattern, QChar customEscapeChar = QChar::Null) const; // 保持 const
+
+    // 新增 visualLength 的声明
+    int visualLength(const QString& str) const;
 
     //GUI
     popupWidget *popup;

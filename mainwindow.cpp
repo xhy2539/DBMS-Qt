@@ -104,6 +104,14 @@ MainWindow::MainWindow(const QString &name,QWidget *parent)
     connect(ui->treeWidget, &QTreeWidget::itemClicked, this, &MainWindow::handleItemClicked);
     connect(ui->treeWidget, &QTreeWidget::itemDoubleClicked, this, &MainWindow::handleItemDoubleClicked);
     connect(tablelist,&tableList::tableOpen,this ,&MainWindow::openTable);
+    connect(tablelist,&tableList::tableDrop,[=](QString dbName, QString sql){
+        db_manager.use_database(dbName);
+        handleString(sql);
+        textBuffer.clear();
+        dataSearch();
+        buildTree();
+        updateList(current_GUI_Db);
+    });
 }
 
 MainWindow::~MainWindow()
@@ -3029,39 +3037,36 @@ void MainWindow::openTable(QString tableName){
     }
 
 
-    for(xhydatabase database : db_manager.databases()){
-        if(database.name() == current_GUI_Db){
-            for(xhytable table : database.tables()){
-                if(table.name() == tableName){
+    xhydatabase* database = db_manager.find_database(current_GUI_Db);
+    xhytable* table = database->find_table(tableName);
+    if(table){
+        tableShow *tableshow = new tableShow(&db_manager,current_GUI_Db,tableName,ui->tabWidget);
+        ui->tabWidget->addTab(tableshow,tableName+" @"+current_GUI_Db);
+        ui->tabWidget->setCurrentWidget(tableshow);
+        // tableshow->setTable(table);
+        tableshow->resetShow();
 
-                    tableShow *tableshow = new tableShow(ui->tabWidget,current_GUI_Db);
-                    ui->tabWidget->addTab(tableshow,tableName+" @"+current_GUI_Db);
-                    ui->tabWidget->setCurrentWidget(tableshow);
-                    tableshow->setTable(table);
+        connect(tableshow,&tableShow::dataChanged,[=](const QString& sql ){
+        db_manager.use_database( current_GUI_Db );
+        // qDebug()<<sql;
+        handleString(sql+"\n");
 
-                    connect(tableshow,&tableShow::dataChanged,[=](const QString& sql ){
-                        db_manager.use_database( current_GUI_Db );
-                        // qDebug()<<sql;
-                        handleString(sql+"\n");
-                        // for(QString st: textBuffer){
-                        //     qDebug()<<"textBuffer:"<<st;
-                        // }
-                        QMessageBox msg;
-                        QString ass = textBuffer[textBuffer.count()-2];
-                        if(!ass.contains("1行以更新")) {
-                            msg.setWindowTitle("错误");
-                            msg.setText(ass);
-                            msg.setStandardButtons(QMessageBox::Ok);
-                            msg.exec();
-                        }else
-                            tableshow->resetButton(true);
+        QString ass = textBuffer.join("");
+        qDebug()<<ass;
+        if(!ass.isEmpty()){
 
-                        textBuffer.clear();
-                    });
-                    return ;
-                }
-            }
+            if(ass.contains("0行") || ass.contains("errors")) {
+                QMessageBox msg;
+                msg.setWindowTitle("错误");
+                msg.setText(ass);
+                msg.setStandardButtons(QMessageBox::Ok);
+                msg.exec();
+            }else
+                tableshow->resetButton(true);
         }
+        textBuffer.clear();
+        });
+
     }
 }
 

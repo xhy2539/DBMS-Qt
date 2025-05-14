@@ -26,6 +26,10 @@ void tableList::addItems(QList<QString> items){
     ui->listWidget->addItems(items);
 }
 
+void tableList::setDb(QString db){
+    current_db = db;
+}
+
 void tableList::on_listWidget_itemDoubleClicked(QListWidgetItem *item)
 {
     emit tableOpen(item->text());
@@ -40,5 +44,18 @@ void tableList::on_openTable_released()
 void tableList::on_listWidget_itemClicked(QListWidgetItem *item)
 {
     current_itemName = item->text();
+}
+
+
+void tableList::on_createTable_released()
+{
+
+}
+
+
+void tableList::on_dropTable_released()
+{
+    QString sql = "DROP TABLE " + current_itemName + ";";
+    emit tableDrop(current_db,sql);
 }
 

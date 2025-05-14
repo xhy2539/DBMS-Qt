@@ -2,7 +2,7 @@
 #define TABLESHOW_H
 
 #include <QWidget>
-#include "xhytable.h"
+#include "xhydbmanager.h"
 #include <QTableWidgetItem>
 
 namespace Ui {
@@ -14,12 +14,15 @@ class tableShow : public QWidget
     Q_OBJECT
 
 public:
-    explicit tableShow(QWidget *parent = nullptr , QString dbName = nullptr );
+    explicit tableShow(xhydbmanager * dbms, QString dbName , QString tableName , QWidget *parent = nullptr );
     ~tableShow();
-    void setTable(xhytable table);
+    // void setTable(const xhytable& table);
     void resetButton(bool yes);
+    void resetShow();
 signals:
     void dataChanged(const QString& sql);
+
+    void refresh();
 private slots:
     void on_addRecord_released();
 
@@ -29,10 +32,14 @@ private slots:
 
     void on_cancle_released();
 
+    void on_refresh_released();
+
 private:
     Ui::tableShow *ui;
-    xhytable m_table ;
-    QString dbName;
+    QString m_tableName ;
+    QString m_dbName;
+    xhydbmanager * m_dbms;
+    xhytable * m_table;
     bool adding = false;
 };
 

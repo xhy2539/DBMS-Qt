@@ -2,13 +2,15 @@
 #include "ui_tableshow.h"
 #include "CustomDelegate.h"
 
-tableShow::tableShow(QWidget *parent, QString dbName )
+tableShow::tableShow(xhydbmanager* dbms,QString dbName ,QString tableName , QWidget *parent )
     : QWidget(parent)
     , ui(new Ui::tableShow)
-    , dbName(dbName)
-    , m_table(NULL)
+    , m_tableName(tableName)
+    , m_dbName(dbName)
+    , m_dbms(dbms)
 {
-
+    xhydatabase* db = m_dbms->find_database(m_dbName);
+    m_table = db->find_table(m_tableName);
     ui->setupUi(this);
     ui->comfirm->setEnabled(false);
     ui->cancle->setEnabled(false);
@@ -17,19 +19,19 @@ tableShow::tableShow(QWidget *parent, QString dbName )
 
     // 连接自定义信号到槽函数
     connect(delegate, &CustomDelegate::dataChanged,[=](int row, int col, const QString &oldVal, const QString &newVal) {
-        if(row < m_table.records().count()){
+        if(row < m_table->records().count()){
             // qDebug() << "行:" << row << "列:" << col << "旧值:" << oldVal << "新值:" << newVal <<m_table.records().count();
             // qDebug()<<" "<<ui->tableWidget->item(row,col)->text();
             QString updateString,columnName;
-            columnName = m_table.fields().at(col).name();
+            columnName = m_table->fields().at(col).name();
 
-            updateString = "UPDATE "+m_table.name()+" SET "+ columnName +" = "+newVal+" WHERE ";
-            for(QString primary : m_table.primaryKeys()){
+            updateString = "UPDATE "+m_table->name()+" SET "+ columnName +" = "+newVal+" WHERE ";
+            for(QString primary : m_table->primaryKeys()){
                 int i=1;
                 if(i == 1){
-                    updateString += (primary + " = " +m_table.records().at(row).value(primary));
+                    updateString += (primary + " = " +m_table->records().at(row).value(primary));
                 }else
-                    updateString += (" AND "+primary + " = " +m_table.records().at(row).value(primary));
+                    updateString += (" AND "+primary + " = " +m_table->records().at(row).value(primary));
                 i++;
             }
             updateString += ";";
@@ -45,10 +47,21 @@ tableShow::~tableShow()
     delete ui;
 }
 
-void tableShow::setTable(xhytable table){
-    m_table = table;
-    ui->tableWidget->setColumnCount(table.fields().count());
-    ui->tableWidget->setRowCount(table.records().count());
+// void tableShow::setTable(const xhytable& table){
+//     m_table = table;
+
+//     // for(QString primaryKey : table.primaryKeys()){
+//     //     qDebug()<<primaryKey;
+//     // }
+// }
+
+void tableShow::resetShow(){
+    xhydatabase* db = m_dbms->find_database(m_dbName);
+    m_table = db->find_table(m_tableName);
+
+    ui->tableWidget->clear();
+    ui->tableWidget->setColumnCount(m_table->fields().count());
+    ui->tableWidget->setRowCount(m_table->records().count());
 
     int row = 0;
     QStringList headers;
@@ -59,24 +72,21 @@ void tableShow::setTable(xhytable table){
         "    text-align: top-left;"       // 对齐方式
         "}"
     );
-    for(xhyfield field : table.fields()){
+    for(xhyfield field : m_table->fields()){
         headers << (field.name()+"\n("+field.typestring()+")");
 
     }
     ui->tableWidget->setHorizontalHeaderLabels(headers);
     ui->tableWidget->horizontalHeader()->setMinimumSectionSize(40);
-    for(xhyrecord record : table.records()){
+    for(xhyrecord record : m_table->records()){
         int column = 0;
 
-        for(int column = 0; column < table.fields().count(); ++column){
-            ui->tableWidget->setItem(row,column,new QTableWidgetItem(record.value(table.fields().at(column).name())));
+        for(int column = 0; column < m_table->fields().count(); ++column){
+            ui->tableWidget->setItem(row,column,new QTableWidgetItem(record.value(m_table->fields().at(column).name())));
 
         }
         row++;
     }
-    // for(QString primaryKey : table.primaryKeys()){
-    //     qDebug()<<primaryKey;
-    // }
 }
 
 void tableShow::on_addRecord_released()
@@ -89,14 +99,14 @@ void tableShow::on_addRecord_released()
 void tableShow::on_deleteRecord_released()
 {
     int row = ui->tableWidget->currentRow();
-    QString deleteString = "DELETE FROM "+m_table.name() +" WHERE ";
+    QString deleteString = "DELETE FROM "+m_table->name() +" WHERE ";
 
-    for(QString primary : m_table.primaryKeys()){
+    for(QString primary : m_table->primaryKeys()){
         int i=1;
         if(i == 1){
-        deleteString += (primary + " = " +m_table.records().at(row).value(primary));
+        deleteString += (primary + " = " +m_table->records().at(row).value(primary));
         }else
-            deleteString += (" AND "+primary + " = " +m_table.records().at(row).value(primary));
+            deleteString += (" AND "+primary + " = " +m_table->records().at(row).value(primary));
         i++;
     }
     deleteString += ";";
@@ -108,9 +118,9 @@ void tableShow::on_deleteRecord_released()
 
 void tableShow::on_comfirm_released()
 {
-    QString insertString = "INSERT INTO "+m_table.name()+"(";
+    QString insertString = "INSERT INTO "+m_table->name()+"(";
     int i=1;
-    for(xhyfield field : m_table.fields()){
+    for(xhyfield field : m_table->fields()){
         if(i == 1)
             insertString += field.name();
         else
@@ -154,3 +164,9 @@ void tableShow::resetButton(bool yes){
     ui->comfirm->setEnabled(!yes);
     ui->cancle->setEnabled(!yes);
 }
+
+void tableShow::on_refresh_released()
+{
+    resetShow();
+}
+

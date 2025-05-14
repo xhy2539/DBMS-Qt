@@ -108,18 +108,18 @@ QString xhyfield::typestring() const {
     }
 
     // 附加字段级别的 CHECK 约束
-    QStringList checkConstraintExpressions;
-    for (const QString& constraint : m_constraints) {
-        if (constraint.startsWith("CHECK(", Qt::CaseInsensitive) && constraint.endsWith(")")) {
-            // 添加完整的 "CHECK(...)" 字符串，通常为了统一性转为大写
-            checkConstraintExpressions.append(constraint.toUpper());
-        }
-    }
+    // QStringList checkConstraintExpressions;
+    // for (const QString& constraint : m_constraints) {
+    //     if (constraint.startsWith("CHECK(", Qt::CaseInsensitive) && constraint.endsWith(")")) {
+    //         // 添加完整的 "CHECK(...)" 字符串，通常为了统一性转为大写
+    //         checkConstraintExpressions.append(constraint.toUpper());
+    //     }
+    // }
 
-    if (!checkConstraintExpressions.isEmpty()) {
-        // 如果有 CHECK 约束，将其附加到类型字符串后面，用空格隔开
-        typeAndParams += " " + checkConstraintExpressions.join(" "); // 如果有多个（不常见），也一并加入
-    }
+    // if (!checkConstraintExpressions.isEmpty()) {
+    //     // 如果有 CHECK 约束，将其附加到类型字符串后面，用空格隔开
+    //     typeAndParams += " " + checkConstraintExpressions.join(" "); // 如果有多个（不常见），也一并加入
+    // }
 
     return typeAndParams; // 返回包含类型、参数和CHECK约束的完整字符串
 }

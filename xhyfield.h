@@ -13,7 +13,11 @@ public:
         DATE, DATETIME, TIMESTAMP,
         BOOL, ENUM
     };
-
+    void addConstraintString(const QString& constraintStr) { // 新增方法
+        if (!m_constraints.contains(constraintStr, Qt::CaseInsensitive)) { // 避免重复
+            m_constraints.append(constraintStr);
+        }
+    }
     xhyfield(const QString& name = "",
              datatype type = VARCHAR,
              const QStringList& constraints = {});

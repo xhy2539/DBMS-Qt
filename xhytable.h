@@ -13,18 +13,25 @@
 // 前向声明，避免循环依赖
 class xhydatabase;
 struct ForeignKeyDefinition {
-    QString constraintName;          // 约束名称
-    QString referenceTable;          // 引用（父）表的名称
-    // QMap 来存储子表列名 -> 父表列名 的映射
+    QString constraintName;
+    QString referenceTable;
     QMap<QString, QString> columnMappings;
-    // 可选：ON DELETE 和 ON UPDATE 规则，例如 "RESTRICT", "CASCADE", "SET NULL"
-    // QString onDeleteAction;
-    // QString onUpdateAction;
+
+    // 新增：存储级联动作
+    enum ReferentialAction {
+        NO_ACTION, // 默认或 RESTRICT
+        CASCADE,
+        SET_NULL,
+        SET_DEFAULT // SET_DEFAULT 比较复杂，这里暂时不完全实现其逻辑
+    };
+
+    ReferentialAction onDeleteAction = NO_ACTION; // 默认为 NO_ACTION 或 RESTRICT
+    ReferentialAction onUpdateAction = NO_ACTION; // 默认为 NO_ACTION 或 RESTRICT
 
     // 默认构造函数
     ForeignKeyDefinition() = default;
 
-    // 比较操作符，方便在 QList 中查找或移除
+    // 比较操作符
     bool operator==(const ForeignKeyDefinition& other) const {
         return constraintName.compare(other.constraintName, Qt::CaseInsensitive) == 0;
     }
@@ -61,9 +68,12 @@ public:
 
     void add_primary_key(const QStringList& keys);
     void add_foreign_key(const QStringList& childColumns,
-                                   const QString& referencedTable,
-                                   const QStringList& referencedColumns,
-                                   const QString& constraintNameIn);
+                         const QString& referencedTable,
+                         const QStringList& referencedColumns,
+                         const QString& constraintNameIn,
+                         ForeignKeyDefinition::ReferentialAction onDeleteAction = ForeignKeyDefinition::NO_ACTION,
+                         ForeignKeyDefinition::ReferentialAction onUpdateAction = ForeignKeyDefinition::NO_ACTION);
+
     void add_unique_constraint(const QStringList& fields, const QString& constraintName = "");
     void add_check_constraint(const QString& condition, const QString& constraintName = "");
 
@@ -89,7 +99,9 @@ public:
     // 新增：设置父数据库的方法
     void setParentDb(xhydatabase* db) { m_parentDb = db; }
 
-    void validateRecord(const QMap<QString, QString>& values, const xhyrecord* original_record_for_update = nullptr) const;
+    void validateRecord(const QMap<QString, QString>& valuesToValidate,
+                                  const xhyrecord* original_record_for_update=nullptr,
+                                  bool isBeingValidatedDueToCascade=false ) const;
     bool validateType(xhyfield::datatype type, const QString& value, const QStringList& constraints) const;
     bool checkConstraint(const xhyfield& field, const QString& value) const; // CHECK 约束 (目前是占位符)
 

@@ -2602,89 +2602,213 @@ bool MainWindow::validateCheckExpression(const QString& expression) {
     return balance == 0;
 }
 
+
 void MainWindow::handleTableConstraint(const QString &constraint_str_input, xhytable &table) {
     QString constraint_str = constraint_str_input.trimmed();
-    QRegularExpression re_named(R"(CONSTRAINT\s+([\w_]+)\s+(PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY)\s*(?:\((.+?)\))?(.*))", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
-    QRegularExpression re_unnamed(R"((PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY)\s*\((.+?)\)(.*))", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+    qDebug() << "[handleTableConstraint] 开始解析表级约束: " << constraint_str;
 
-    QRegularExpressionMatch match = re_named.match(constraint_str);
     QString constraintName;
-    QString constraintTypeStr;
-    QString columnsPart;
-    QString remainingPart;
+    QString constraintTypeKeyword; // PRIMARY KEY, UNIQUE, CHECK, FOREIGN KEY
+    QString mainClause;            // 列列表或 CHECK 表达式或 FOREIGN KEY 的列列表
+    QString remainingClause;       // FOREIGN KEY 的 REFERENCES 和 ON UPDATE/DELETE
 
-    if (match.hasMatch()) {
-        constraintName = match.captured(1).trimmed();
-        constraintTypeStr = match.captured(2).trimmed().toUpper().replace(" ", "_");
-        columnsPart = match.captured(3).trimmed();
-        remainingPart = match.captured(4).trimmed();
-    } else {
-        match = re_unnamed.match(constraint_str);
-        if (match.hasMatch()) {
-            constraintTypeStr = match.captured(1).trimmed().toUpper().replace(" ", "_");
-            columnsPart = match.captured(2).trimmed();
-            remainingPart = match.captured(3).trimmed();
+    // 步骤 1: 提取可选的约束名和主要的约束类型关键字
+    QRegularExpression constraintStartRe(
+        R"(^(?:CONSTRAINT\s+([\w_]+)\s+)?(PRIMARY\s+KEY|UNIQUE|CHECK|FOREIGN\s+KEY)\s*(.*)$)",
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption
+        );
+
+    QRegularExpressionMatch startMatch = constraintStartRe.match(constraint_str);
+
+    if (!startMatch.hasMatch()) {
+        // 特殊处理可能没有 PRIMARY KEY/UNIQUE/FOREIGN KEY/CHECK 关键字的 CHECK 约束，
+        // 例如直接 CHECK (expression)
+        if (constraint_str.toUpper().startsWith("CHECK")) {
+            QRegularExpression checkOnlyRe(R"(^CHECK\s*\((.*)\)$)", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+            QRegularExpressionMatch checkOnlyMatch = checkOnlyRe.match(constraint_str);
+            if (checkOnlyMatch.hasMatch()) {
+                constraintTypeKeyword = "CHECK";
+                mainClause = checkOnlyMatch.captured(1).trimmed(); // CHECK 表达式
+                remainingClause = ""; // CHECK 约束通常没有剩余部分
+                qDebug() << "  检测到直接的 CHECK 约束。类型: " << constraintTypeKeyword << ", 表达式: " << mainClause;
+            } else {
+                textBuffer.append("错误: 无效的表级约束定义 (CHECK 格式错误): " + constraint_str);
+                qWarning() << "  [handleTableConstraint] 无法解析约束 (CHECK 格式错误): " << constraint_str;
+                return;
+            }
         } else {
-            textBuffer.append("错误: 无效的表级约束定义: " + constraint_str);
+            textBuffer.append("错误: 无效的表级约束定义 (无法识别约束类型): " + constraint_str);
+            qWarning() << "  [handleTableConstraint] 无法解析约束 (起始部分格式错误): " << constraint_str;
+            return;
+        }
+    } else {
+        constraintName = startMatch.captured(1).trimmed(); // 可能为空
+        constraintTypeKeyword = startMatch.captured(2).trimmed().toUpper().replace(" ", "_");
+        QString bodyAndRemainder = startMatch.captured(3).trimmed();
+
+        qDebug() << "  初步解析: Name='" << constraintName << "', TypeKeyword='" << constraintTypeKeyword << "', BodyAndRemainder='" << bodyAndRemainder << "'";
+
+        // 步骤 2: 根据约束类型，分离主子句 (列列表/表达式) 和剩余子句
+        if (constraintTypeKeyword == "PRIMARY_KEY" || constraintTypeKeyword == "UNIQUE" || constraintTypeKeyword == "FOREIGN_KEY") {
+            // 这些约束类型后面紧跟着括号括起来的列列表
+            QRegularExpression columnsRe(R"(^\((.+?)\)(.*)$)", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+            QRegularExpressionMatch columnsMatch = columnsRe.match(bodyAndRemainder);
+            if (!columnsMatch.hasMatch()) {
+                textBuffer.append(QString("错误: %1 约束缺少括号括起来的列列表: %2").arg(constraintTypeKeyword, bodyAndRemainder));
+                return;
+            }
+            mainClause = columnsMatch.captured(1).trimmed(); // 列列表字符串
+            remainingClause = columnsMatch.captured(2).trimmed(); // FOREIGN KEY 的 REFERENCES 等
+            qDebug() << "  列约束类型: 列列表='" << mainClause << "', 剩余='" << remainingClause << "'";
+        } else if (constraintTypeKeyword == "CHECK") {
+            // CHECK 约束的主体是括号括起来的表达式
+            QRegularExpression checkExprRe(R"(^\((.+)\)$)", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+            QRegularExpressionMatch checkMatch = checkExprRe.match(bodyAndRemainder);
+            if (!checkMatch.hasMatch()) {
+                textBuffer.append(QString("错误: CHECK 约束缺少括号括起来的表达式: %1").arg(bodyAndRemainder));
+                return;
+            }
+            mainClause = checkMatch.captured(1).trimmed(); // CHECK 表达式
+            remainingClause = ""; // CHECK 约束通常没有其他剩余部分
+            qDebug() << "  CHECK 约束: 表达式='" << mainClause << "'";
+        }
+    }
+
+    // 步骤 3: 解析列列表 (如果适用)
+    QStringList columns;
+    if (constraintTypeKeyword == "PRIMARY_KEY" || constraintTypeKeyword == "UNIQUE" || constraintTypeKeyword == "FOREIGN_KEY") {
+        if (mainClause.isEmpty()) {
+            textBuffer.append(QString("错误: %1 约束必须指定列。").arg(constraintTypeKeyword));
+            return;
+        }
+        columns = mainClause.split(',', Qt::SkipEmptyParts);
+        for (QString& col : columns) {
+            col = col.trimmed();
+            if (col.isEmpty()) {
+                textBuffer.append(QString("错误: %1 约束中的列名不能为空。").arg(constraintTypeKeyword));
+                return;
+            }
+            if (!table.has_field(col)) {
+                textBuffer.append(QString("错误: %1 约束引用的列 '%2' 在表 '%3' 中不存在。").arg(constraintTypeKeyword, col, table.name()));
+                return;
+            }
+        }
+        if (columns.isEmpty()) { // 再次检查，以防 split 后为空
+            textBuffer.append(QString("错误: %1 约束的列列表解析后为空。").arg(constraintTypeKeyword));
             return;
         }
     }
 
-    QStringList columns;
-    if(!columnsPart.isEmpty() && (constraintTypeStr == "PRIMARY_KEY" || constraintTypeStr == "UNIQUE" || constraintTypeStr == "FOREIGN_KEY")){
-        columns = columnsPart.split(',', Qt::SkipEmptyParts);
-        for(QString& col : columns) col = col.trimmed();
-        if (constraintName.isEmpty() && !columns.isEmpty()) {
-            constraintName = constraintTypeStr + "_" + table.name();
-            for(const QString& col : columns) constraintName += "_" + col;
+    // 步骤 4: 自动生成约束名 (如果未提供)
+    if (constraintName.isEmpty()) {
+        QString baseName = constraintTypeKeyword.at(0) + constraintTypeKeyword.mid(1).toLower() + "_" + table.name();
+        if (!columns.isEmpty()) {
+            for(const QString& col : columns) { baseName += "_" + col.toLower(); }
+        } else if (constraintTypeKeyword == "CHECK") {
+            baseName += "_expr" + QString::number(table.checkConstraints().size() + 1);
         }
+        constraintName = baseName;
+        constraintName.truncate(64); // 限制长度
+        qDebug() << "  自动生成的约束名: " << constraintName;
     }
-    if (constraintName.isEmpty() && constraintTypeStr == "CHECK") {
-        constraintName = constraintTypeStr + "_" + table.name() + "_auto_chk" + QString::number(table.fields().size() +1);
-    }
 
+    // 步骤 5: 应用约束到表
+    try {
+        if (constraintTypeKeyword == "PRIMARY_KEY") {
+            table.add_primary_key(columns);
+            textBuffer.append(QString("表约束 '%1' (PRIMARY KEY on %2) 已添加。").arg(constraintName, columns.join(", ")));
+        } else if (constraintTypeKeyword == "UNIQUE") {
+            table.add_unique_constraint(columns, constraintName);
+            textBuffer.append(QString("表约束 '%1' (UNIQUE on %2) 已添加。").arg(constraintName, columns.join(", ")));
+        } else if (constraintTypeKeyword == "CHECK") {
+            if (mainClause.isEmpty()) { // mainClause 是 CHECK 表达式
+                textBuffer.append("错误: CHECK 约束的表达式不能为空。"); return;
+            }
+            if (!validateCheckExpression(mainClause)) {
+                textBuffer.append("错误: CHECK 约束表达式 '" + mainClause + "' 括号不匹配。"); return;
+            }
+            table.add_check_constraint(mainClause, constraintName);
+            textBuffer.append(QString("表约束 '%1' (CHECK (%2)) 已添加。").arg(constraintName, mainClause));
+        } else if (constraintTypeKeyword == "FOREIGN_KEY") {
+            QRegularExpression fkRefRe(
+                R"(REFERENCES\s+([\w_]+)\s*\(([\w_,\s]+)\))", // 捕获: 1=表名, 2=列列表
+                QRegularExpression::CaseInsensitiveOption
+                );
+            QRegularExpressionMatch refMatch = fkRefRe.match(remainingClause);
+            if (!refMatch.hasMatch()) {
+                textBuffer.append("错误: FOREIGN KEY 约束 '" + constraint_str_input + "' 缺少有效的 REFERENCES 子句。检测部分: '" + remainingClause + "'");
+                return;
+            }
 
-    if (constraintTypeStr == "PRIMARY_KEY") {
-        if (columns.isEmpty()) { textBuffer.append("错误: PRIMARY KEY 约束必须指定列。"); return; }
-        table.add_primary_key(columns);
-        textBuffer.append(QString("表约束 '%1' (PRIMARY KEY on %2) 已添加。").arg(constraintName.isEmpty() ? "auto_pk" : constraintName, columns.join(",")));
-    } else if (constraintTypeStr == "UNIQUE") {
-        if (columns.isEmpty()) { textBuffer.append("错误: UNIQUE 约束必须指定列。"); return; }
-        table.add_unique_constraint(columns, constraintName);
-        textBuffer.append(QString("表约束 '%1' (UNIQUE on %2) 已添加。").arg(constraintName, columns.join(",")));
-    } else if (constraintTypeStr == "CHECK") {
-        if (columnsPart.isEmpty()) { textBuffer.append("错误: CHECK 约束必须指定条件表达式 (in Klammern)."); return; }
-        table.add_check_constraint(columnsPart, constraintName);
-        textBuffer.append(QString("表约束 '%1' (CHECK %2) 已添加。").arg(constraintName, columnsPart));
-    } else if (constraintTypeStr == "FOREIGN_KEY") {
-        if (columns.isEmpty()) { textBuffer.append("错误: FOREIGN KEY 约束必须指定列。"); return; }
+            QString referencedTable = refMatch.captured(1).trimmed();
+            QStringList referencedColumnsList = refMatch.captured(2).trimmed().split(',', Qt::SkipEmptyParts);
+            for(QString& rcol : referencedColumnsList) {
+                rcol = rcol.trimmed();
+                if (rcol.isEmpty()) { textBuffer.append("错误: FOREIGN KEY 约束的引用列名不能为空。"); return; }
+            }
 
-        QRegularExpression fkRefRe(R"(REFERENCES\s+([\w_]+)\s*\(([\w_,\s]+)\))", QRegularExpression::CaseInsensitiveOption);
-        QRegularExpressionMatch fkMatch = fkRefRe.match(remainingPart);
-        if (!fkMatch.hasMatch()) {
-            textBuffer.append("错误: FOREIGN KEY 约束缺少有效的 REFERENCES 子句。"); return;
+            if (columns.size() != referencedColumnsList.size()) {
+                textBuffer.append(QString("错误: FOREIGN KEY 列数量 (%1) 与引用的列数量 (%2) 不匹配。")
+                                      .arg(columns.size()).arg(referencedColumnsList.size()));
+                return;
+            }
+
+            ForeignKeyDefinition::ReferentialAction onDeleteAction = ForeignKeyDefinition::NO_ACTION;
+            ForeignKeyDefinition::ReferentialAction onUpdateAction = ForeignKeyDefinition::NO_ACTION;
+
+            // 从 REFERENCES 子句之后的部分解析 ON DELETE/UPDATE
+            QString actionsPart = remainingClause.mid(refMatch.capturedLength()).trimmed();
+            qDebug() << "  [FK PARSE] 解析 ON DELETE/UPDATE 的部分: '" << actionsPart << "'";
+
+            QRegularExpression onActionRe(R"(ON\s+(DELETE|UPDATE)\s+(CASCADE|SET\s+NULL|NO\s+ACTION|RESTRICT|SET\s+DEFAULT))", QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatchIterator action_it = onActionRe.globalMatch(actionsPart);
+            bool onDeleteSpecified = false;
+            bool onUpdateSpecified = false;
+
+            while(action_it.hasNext()){
+                QRegularExpressionMatch actionMatch = action_it.next();
+                QString event = actionMatch.captured(1).toUpper();
+                QString actionStr = actionMatch.captured(2).toUpper().replace(" ", "_");
+                qDebug() << "    [FK PARSE ACTION] 匹配到: Event='" << event << "', ActionStr='" << actionStr << "'";
+
+                ForeignKeyDefinition::ReferentialAction currentActionParsed = ForeignKeyDefinition::NO_ACTION;
+                if (actionStr == "CASCADE") currentActionParsed = ForeignKeyDefinition::CASCADE;
+                else if (actionStr == "SET_NULL") currentActionParsed = ForeignKeyDefinition::SET_NULL;
+                else if (actionStr == "NO_ACTION") currentActionParsed = ForeignKeyDefinition::NO_ACTION;
+                else if (actionStr == "RESTRICT") currentActionParsed = ForeignKeyDefinition::NO_ACTION;
+                else if (actionStr == "SET_DEFAULT") {
+                    currentActionParsed = ForeignKeyDefinition::SET_DEFAULT;
+                    textBuffer.append(QString("注意: ON %1 SET DEFAULT 将被记录，但其完整级联行为可能未完全实现。").arg(event));
+                }
+
+                if (event == "DELETE" && !onDeleteSpecified) {
+                    onDeleteAction = currentActionParsed;
+                    onDeleteSpecified = true;
+                } else if (event == "UPDATE" && !onUpdateSpecified) {
+                    onUpdateAction = currentActionParsed;
+                    onUpdateSpecified = true;
+                } else if ((event == "DELETE" && onDeleteSpecified) || (event == "UPDATE" && onUpdateSpecified)) {
+                    qWarning() << "  [FK PARSE WARNING] 重复指定 ON" << event << "动作，将使用第一个解析到的。";
+                }
+            }
+            qDebug() << "  [FK PARSE] 最终解析的动作: ON DELETE=" << static_cast<int>(onDeleteAction)
+                     << ", ON UPDATE=" << static_cast<int>(onUpdateAction);
+
+            table.add_foreign_key(columns, referencedTable, referencedColumnsList, constraintName, onDeleteAction, onUpdateAction);
+            textBuffer.append(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4) ON DELETE %5 ON UPDATE %6) 已添加。")
+                                  .arg(constraintName.isEmpty() ? "auto_fk" : constraintName) // 确保约束名非空
+                                  .arg(columns.join(", "))
+                                  .arg(referencedTable)
+                                  .arg(referencedColumnsList.join(", "))
+                                  .arg(onDeleteAction == ForeignKeyDefinition::CASCADE ? "CASCADE" : (onDeleteAction == ForeignKeyDefinition::SET_NULL ? "SET NULL" : (onDeleteAction == ForeignKeyDefinition::SET_DEFAULT ? "SET DEFAULT" : "NO ACTION")))
+                                  .arg(onUpdateAction == ForeignKeyDefinition::CASCADE ? "CASCADE" : (onUpdateAction == ForeignKeyDefinition::SET_NULL ? "SET NULL" : (onUpdateAction == ForeignKeyDefinition::SET_DEFAULT ? "SET DEFAULT" : "NO ACTION"))));
+        } else {
+            textBuffer.append("错误: 不支持的表约束类型: '" + constraintTypeKeyword + "'.");
         }
-        QString referencedTable = fkMatch.captured(1).trimmed();
-        QStringList referencedColumnsList;
-        QString referencedColumnsPart = fkMatch.captured(2).trimmed();
-        referencedColumnsList = referencedColumnsPart.split(',', Qt::SkipEmptyParts);
-        for(QString& rcol : referencedColumnsList) rcol = rcol.trimmed();
-
-        if (columns.size() != referencedColumnsList.size()) {
-            textBuffer.append("错误: FOREIGN KEY 列数量与引用的列数量不匹配。"); return;
-        }
-
-        // 调用修改后的 add_foreign_key 方法，传入列列表
-        table.add_foreign_key(columns, referencedTable, referencedColumnsList, constraintName); // <-- 修改此处！
-        textBuffer.append(QString("表约束 '%1' (FOREIGN KEY (%2) REFERENCES %3(%4)) 已添加。")
-                              .arg(constraintName, columns.join(", "), referencedTable, referencedColumnsList.join(", ")));
-
-    } else {
-        textBuffer.append("错误: 不支持的表约束类型: " + constraintTypeStr);
+    } catch (const std::runtime_error& e) {
+        textBuffer.append(QString("处理表约束 '%1' 时发生错误: %2").arg(constraint_str_input, QString::fromStdString(e.what())));
     }
 }
-
-
 void MainWindow::show_databases() {
     auto databases = db_manager.databases();
     if (databases.isEmpty()) {
@@ -2727,15 +2851,13 @@ void MainWindow::show_tables(const QString& db_name_input) {
 
 
 
-namespace { // 使用匿名命名空间，使这两个函数仅在本文件可见
 
+namespace { // 使用匿名命名空间，使这两个函数仅在本文件可见
 
 int visualLength(const QString& str) {
     int length = 0;
     for (QChar qc : str) {
         char16_t c = qc.unicode();
-        // 这个范围是一个简化的判断，主要覆盖中日韩统一表意文字等常见的东亚宽字符。
-        // 更精确的判断可能需要更复杂的Unicode属性库。
         if ((c >= 0x2E80 && c <= 0x9FFF) || // CJK Radicals Supplement, CJK Unified Ideographs, etc.
             (c >= 0xAC00 && c <= 0xD7A3) || // Hangul Syllables
             (c >= 0xF900 && c <= 0xFAFF) || // CJK Compatibility Ideographs
@@ -2749,22 +2871,54 @@ int visualLength(const QString& str) {
     return length;
 }
 
-// 将字符串左对齐填充到指定的视觉宽度
 QString padToVisualWidth(const QString& str, int targetVisualWidth) {
     QString paddedStr = str;
     int currentVisualLen = visualLength(str);
     if (currentVisualLen < targetVisualWidth) {
         paddedStr += QString(targetVisualWidth - currentVisualLen, ' ');
     }
-    // 如果需要，可以添加截断逻辑：
-    else if (currentVisualLen > targetVisualWidth) {
-        // 简单的截断 (可能不理想，因为它不考虑字符边界)
-         paddedStr = str.left(targetVisualWidth - 3) + "...";
+    else if (currentVisualLen > targetVisualWidth && targetVisualWidth > 3) { // 确保targetVisualWidth足够大以容纳"..."
+        // 简单的截断，尝试保持视觉宽度接近目标
+        // 这部分可能需要更复杂的逻辑来精确处理多字节字符的截断
+        while(visualLength(paddedStr) > targetVisualWidth - 3 && !paddedStr.isEmpty()){
+            paddedStr.chop(1);
+        }
+        paddedStr += "...";
+    } else if (currentVisualLen > targetVisualWidth && targetVisualWidth <=3 && targetVisualWidth > 0) {
+        // 如果目标宽度太小，只取前面的部分字符
+        QString tempStr;
+        int tempLen = 0;
+        for(QChar qc : str){
+            tempStr.append(qc);
+            tempLen += ((qc.unicode() >= 0x2E80 && qc.unicode() <= 0x9FFF) || \
+                        (qc.unicode() >= 0xAC00 && qc.unicode() <= 0xD7A3) || \
+                        (qc.unicode() >= 0xF900 && qc.unicode() <= 0xFAFF) || \
+                        (qc.unicode() >= 0xFF00 && qc.unicode() <= 0xFFEF)) ? 2 : 1;
+            if(tempLen > targetVisualWidth) {
+                tempStr.chop(1); // 移除最后一个添加的字符
+                break;
+            }
+        }
+        paddedStr = tempStr;
+    } else if (targetVisualWidth <= 0) {
+        paddedStr = ""; // 目标宽度无效
     }
     return paddedStr;
 }
 
+// 新增辅助函数：将 ReferentialAction 枚举转换为字符串
+QString referentialActionToString(ForeignKeyDefinition::ReferentialAction action) {
+    switch (action) {
+    case ForeignKeyDefinition::CASCADE:     return "CASCADE";
+    case ForeignKeyDefinition::SET_NULL:    return "SET NULL";
+    case ForeignKeyDefinition::SET_DEFAULT: return "SET DEFAULT";
+    case ForeignKeyDefinition::NO_ACTION:   return "NO ACTION"; // 或者 "RESTRICT"
+    default:                                return "UNKNOWN";
+    }
 }
+
+} // 结束匿名命名空间
+
 void MainWindow::show_schema(const QString& db_name_input, const QString& table_name_input) {
     QString db_name = db_name_input.trimmed();
     QString table_name = table_name_input.trimmed();
@@ -2777,15 +2931,24 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
         textBuffer.append(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
-    xhytable* table = db->find_table(table_name); // 需要非 const 指针
+    xhytable* table = db->find_table(table_name);
 
     if (!table) {
         textBuffer.append(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
         return;
     }
     QString output = QString("表 '%1.%2' 的结构:\n").arg(db_name, table_name);
-    output += QString("%1\t%2\t%3\n").arg("列名", -20).arg("类型", -20).arg("约束");
-    output += QString(80, '-') + "\n";
+
+    // 定义列宽 (可以根据需要调整)
+    int colNameWidth = 25;
+    int typeWidth = 25;
+    int constraintWidth = 40; // 给约束留出更多空间
+
+    // 表头格式化
+    output += padToVisualWidth("列名", colNameWidth) + " " +
+              padToVisualWidth("类型", typeWidth) + " " +
+              padToVisualWidth("约束", constraintWidth) + "\n";
+    output += QString(colNameWidth + typeWidth + constraintWidth + 2, '-') + "\n"; // +2 是为了空格分隔符
 
     const QMap<QString, QString>& default_values_map = table->defaultValues();
     const QStringList& primary_keys_list = table->primaryKeys();
@@ -2795,67 +2958,66 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
         QStringList display_constraints_for_field;
         const QStringList& raw_field_constraints = field.constraints();
 
-        // 1. 从字段对象的 m_constraints 获取固有约束。
-        //    关键修改：正确跳过 "DEFAULT" 关键字及其后的原始值。
         for (int i = 0; i < raw_field_constraints.size(); ++i) {
             const QString& constr_str = raw_field_constraints.at(i);
-
             if (constr_str.compare("DEFAULT", Qt::CaseInsensitive) == 0) {
-                // 当遇到 "DEFAULT" 关键字时，它的下一个元素是原始默认值字符串。
-                // 我们需要跳过这两个元素，因为默认值将从 default_values_map 中统一处理。
-                i++; // 跳过原始默认值字符串 (循环的下一次迭代会处理 i 的正确自增)
-                continue; // 跳过 "DEFAULT" 关键字本身
+                i++;
+                continue;
             }
-            // 将其他非 "DEFAULT" 也非其值的约束添加到显示列表
+            // 对于字段级的 PRIMARY_KEY, UNIQUE, NOT_NULL, CHECK，通常会直接显示
+            // 例如 "PRIMARY_KEY", "UNIQUE", "NOT_NULL", "CHECK(...)"
+            // 这里我们主要收集这些关键字或 CHECK 表达式本身
+            if (constr_str.startsWith("SIZE(", Qt::CaseInsensitive) ||
+                constr_str.startsWith("PRECISION(", Qt::CaseInsensitive) ||
+                constr_str.startsWith("SCALE(", Qt::CaseInsensitive)) {
+                // 这些由 field.typestring() 处理，不在此处重复添加
+                continue;
+            }
             display_constraints_for_field.append(constr_str);
         }
 
-        // 2. 处理主键标记和 NOT NULL 约束
-        bool is_primary_key = primary_keys_list.contains(field.name(), Qt::CaseInsensitive);
-        bool is_not_null_from_set = not_null_fields_set.contains(field.name()); // 从集合中检查是否NOT NULL
+        bool is_primary_key_from_table = primary_keys_list.contains(field.name(), Qt::CaseInsensitive);
+        bool is_not_null_from_table_set = not_null_fields_set.contains(field.name());
 
-        if (is_primary_key) {
-            // Prepend "PRIMARY_KEY" if not already added (e.g., from a table-level constraint in raw_field_constraints)
-            if (!display_constraints_for_field.contains("PRIMARY_KEY", Qt::CaseInsensitive)) {
-                // It's possible PRIMARY_KEY was already added if it came from a table-level constraint parsed into field.constraints()
-                // However, typical field-level PK is just "PRIMARY KEY", not from table.add_primary_key to field.constraints()
-                // For safety and clarity, let's assume field.constraints() for field-level PK might not have it,
-                // or table->primaryKeys() is the canonical source.
-                // We will rely on table->primaryKeys() to add it to the display.
-            }
-            display_constraints_for_field.prepend("PRIMARY_KEY"); // 主键总是优先显示
-            is_not_null_from_set = true; // 主键列隐含非空
-        }
+        QStringList final_display_constraints;
 
-        // 统一添加NOT NULL (如果它是主键，或在not_null_fields_set中)
-        if (is_not_null_from_set) {
-            bool already_displayed_not_null = false;
-            for (const QString& displayed_constr : display_constraints_for_field) {
-                if (displayed_constr.compare("NOT_NULL", Qt::CaseInsensitive) == 0) {
-                    already_displayed_not_null = true;
-                    break;
-                }
-            }
-            if (!already_displayed_not_null) {
-                display_constraints_for_field.append("NOT_NULL");
+        if (is_primary_key_from_table) {
+            final_display_constraints.append("PRIMARY KEY");
+            // 主键隐含非空，但如果字段定义也显式标了NOT NULL，避免重复
+            if (!display_constraints_for_field.contains("NOT_NULL", Qt::CaseInsensitive) &&
+                !display_constraints_for_field.contains("NOT NULL", Qt::CaseInsensitive)) {
+                // m_notNullFields 已经包含了主键列，所以 is_not_null_from_table_set 会是 true
             }
         }
+        // 添加 NOT NULL （如果由表级或字段级NOT NULL约束定义，且非主键已隐含）
+        if (is_not_null_from_table_set && !is_primary_key_from_table) { // 如果是主键，上面已处理
+            final_display_constraints.append("NOT NULL");
+        }
 
-        // 3. 处理默认值，从 xhytable::m_defaultValues 获取 (这部分逻辑是正确的)
+
+        // 添加字段级的 UNIQUE 和 CHECK (它们已经存在于 display_constraints_for_field 中，如果适用)
+        for(const QString& field_specific_constr : display_constraints_for_field) {
+            if (field_specific_constr.compare("PRIMARY_KEY", Qt::CaseInsensitive) == 0 ||
+                field_specific_constr.compare("NOT_NULL", Qt::CaseInsensitive) == 0 ||
+                field_specific_constr.compare("NOT NULL", Qt::CaseInsensitive) == 0) {
+                // 已经被上面更统一的方式处理了
+                continue;
+            }
+            final_display_constraints.append(field_specific_constr);
+        }
+
+
         if (default_values_map.contains(field.name())) {
             QString storedDefault = default_values_map.value(field.name());
             QString displayDefault;
-
-            // 使用实际字符串进行比较，以防 DefaultValueKeywords 未在此处定义
             if (storedDefault == "##SQL_NULL##") {
                 displayDefault = "DEFAULT NULL";
             } else if (storedDefault == "##CURRENT_TIMESTAMP##") {
                 displayDefault = "DEFAULT CURRENT_TIMESTAMP";
-            } else { // 普通字面量
-                // 检查是否是数字或布尔值，以决定是否加引号
+            } else {
                 bool isNumericOrBool = false;
                 bool okNum;
-                storedDefault.toDouble(&okNum); // 尝试转换为double
+                storedDefault.toDouble(&okNum);
                 if (okNum) {
                     isNumericOrBool = true;
                 } else if (storedDefault.compare("true", Qt::CaseInsensitive) == 0 ||
@@ -2863,64 +3025,37 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
                     isNumericOrBool = true;
                 }
 
-                const xhyfield* f_def = table->get_field(field.name()); // 获取字段定义
-                if (f_def) { // 根据字段类型决定是否加引号
+                const xhyfield* f_def = table->get_field(field.name());
+                if (f_def) {
                     switch(f_def->type()) {
-                    case xhyfield::CHAR:
-                    case xhyfield::VARCHAR:
-                    case xhyfield::TEXT:
-                    case xhyfield::ENUM:
-                    case xhyfield::DATE:
-                    case xhyfield::DATETIME:
+                    case xhyfield::CHAR: case xhyfield::VARCHAR: case xhyfield::TEXT:
+                    case xhyfield::ENUM: case xhyfield::DATE: case xhyfield::DATETIME:
                     case xhyfield::TIMESTAMP:
-                        displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'"; // SQL转义单引号
+                        displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
                         break;
-                    default: // INT, BOOL, DECIMAL, FLOAT, DOUBLE etc.
+                    default:
                         displayDefault = "DEFAULT " + storedDefault;
                         break;
                     }
                 } else {
-                    // 无法获取字段定义，作为一种回退策略：
-                    // 如果它看起来像数字或布尔值，则不加引号，否则加引号
-                    if (isNumericOrBool) {
-                        displayDefault = "DEFAULT " + storedDefault;
-                    } else {
-                        displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
-                    }
+                    if (isNumericOrBool) displayDefault = "DEFAULT " + storedDefault;
+                    else displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
                 }
             }
-            display_constraints_for_field.append(displayDefault);
+            final_display_constraints.append(displayDefault);
         }
 
-        // 清理可能因为不同来源（如字段级 vs 表级约束）导致的重复约束显示，例如 "NOT_NULL"
-        // 虽然上面的逻辑试图避免，但作为最后一道防线。
-        // 尤其是 CHECK 约束，如果字段级 CHECK(expr) 和表级同名 CHECK(expr) 都被解析并存入，
-        // 确保 xhyfield 的 constraints 和 xhytable 的 checkConstraints 之间如何协调。
-        // 假设这里的 removeDuplicates 是有效的。
-        display_constraints_for_field.removeDuplicates();
+        final_display_constraints.removeDuplicates(); // 统一去重
 
-
-        // 构建最终输出行
-        // field.typestring() 应该返回已经包含长度/精度/标度的完整类型字符串，
-        // 例如 "VARCHAR(100)", "DECIMAL(10,2)", "ENUM('A','B')"
-        // 如果 field.constraints() 中还包含如 "SIZE(100)", "PRECISION(10)", "SCALE(2)"
-        // 那么它们不应该再被单独添加到 display_constraints_for_field 中，
-        // 除非 typestring() 只返回基础类型如 "VARCHAR", "DECIMAL"。
-        // 从您的输出看，类型如 "VARCHAR(100)" 后面还跟着 "SIZE(100)"，这有点冗余。
-        // 理想情况下，SIZE/PRECISION/SCALE 应该被整合到 typestring() 中，或者从 display_constraints_for_field 中移除。
-        // 为保持与您当前输出格式最接近（除了修复默认值问题），我们暂时不改变这部分。
-        output += QString("%1\t%2\t%3\n")
-                      .arg(field.name(), -20)
-                      .arg(field.typestring(), -20)
-                      .arg(display_constraints_for_field.join(" "));
+        output += padToVisualWidth(field.name(), colNameWidth) + " " +
+                  padToVisualWidth(field.typestring(), typeWidth) + " " +
+                  padToVisualWidth(final_display_constraints.join(" "), constraintWidth) + "\n";
     }
 
-    // 显示表级主键信息
     if (!primary_keys_list.isEmpty()) {
         output += "\nPRIMARY KEY: (" + primary_keys_list.join(", ") + ")\n";
     }
 
-    // 显示外键信息
     const QList<ForeignKeyDefinition>& foreign_keys_list = table->foreignKeys();
     if (!foreign_keys_list.isEmpty()) {
         output += "\nFOREIGN KEYS:\n";
@@ -2930,46 +3065,53 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
                 childCols.append(it.key());
                 parentCols.append(it.value());
             }
-            output += QString("  CONSTRAINT %1 FOREIGN KEY (%2) REFERENCES %3 (%4)\n")
+            output += QString("  CONSTRAINT %1 FOREIGN KEY (%2) REFERENCES %3 (%4)")
                           .arg(fkDef.constraintName)
                           .arg(childCols.join(", "))
                           .arg(fkDef.referenceTable)
                           .arg(parentCols.join(", "));
+            // 添加级联信息
+            output += QString(" ON DELETE %1 ON UPDATE %2\n")
+                          .arg(referentialActionToString(fkDef.onDeleteAction))
+                          .arg(referentialActionToString(fkDef.onUpdateAction));
         }
     }
 
-    // 显示 CHECK 约束信息 (从表级约束获取)
+    const QMap<QString, QList<QString>>& unique_constraints_map = table->uniqueConstraints();
+    if (!unique_constraints_map.isEmpty()) {
+        output += "\nUNIQUE CONSTRAINTS:\n";
+        for (auto it = unique_constraints_map.constBegin(); it != unique_constraints_map.constEnd(); ++it) {
+            // 如果唯一约束只包含一个字段，并且该字段已经在字段行显示了 UNIQUE，则可能考虑不在此处重复
+            // 但为了完整性，表级唯一约束通常会单独列出，特别是多字段唯一约束
+            bool showThisUniqueConstraint = true;
+            if (it.value().size() == 1) {
+                const xhyfield* singleField = table->get_field(it.value().first());
+                if (singleField) {
+                    // 检查该字段的 final_display_constraints 是否已包含 "UNIQUE"
+                    // (这里的逻辑可以根据您希望的显示精确度调整)
+                    // 为简单起见，我们总是显示表级唯一约束
+                }
+            }
+            if (showThisUniqueConstraint) {
+                output += QString("  CONSTRAINT %1 UNIQUE (%2)\n")
+                .arg(it.key()) // 约束名
+                    .arg(it.value().join(", ")); // 组成唯一约束的字段列表
+            }
+        }
+    }
+
+
     const QMap<QString, QString>& check_constraints_map = table->checkConstraints();
     if (!check_constraints_map.isEmpty()) {
         output += "\nCHECK CONSTRAINTS:\n";
         for (auto it = check_constraints_map.constBegin(); it != check_constraints_map.constEnd(); ++it) {
-            // 检查这个CHECK约束是否已经在字段级别被显示过了（如果CHECK表达式直接来自字段定义并被加入 field.constraints()）
-            // 这是一个复杂点，取决于您的CHECK约束是如何存储和关联的。
-            // 假设表级的m_checkConstraints是权威来源，或者没有字段级CHECK被直接加入display_constraints_for_field
-            bool already_shown_as_field_check = false;
-            QString check_expr_for_map = QString("CHECK(%1)").arg(it.value()); // 构建与字段约束中可能存在的格式一致的字符串
-            for(const auto& field_obj : table->fields()){
-                for(const QString& field_constr : field_obj.constraints()){
-                    // 字段级的CHECK约束通常会是 CHECK(表达式) 的形式
-                    if(field_constr.compare(check_expr_for_map, Qt::CaseInsensitive) == 0) {
-                        // 这里假设如果字段约束里已经有了这个CHECK表达式，就不再从表级重复显示。
-                        // 但这可能不完全准确，因为字段级CHECK可能没有名字，而表级有。
-                        // 更稳妥的做法是，如果您的 xhyfield::constraints() 不包含由 xhytable::m_checkConstraints 产生的 CHECK，
-                        // 那么这里的显示就是正确的。
-                        // 从您的DESCRIBE输出看，CHECK约束是单独列出的，说明它们是从 m_checkConstraints 来的。
-                        // 因此，这里直接显示 m_checkConstraints 的内容是合理的。
-                    }
-                }
-            }
-            // 如果不进行上述检查，或者检查逻辑不适用，则直接显示：
             output += QString("  CONSTRAINT %1 CHECK (%2)\n")
-                          .arg(it.key())
-                          .arg(it.value());
+            .arg(it.key())
+                .arg(it.value());
         }
     }
     textBuffer.append(output.trimmed());
 }
-
 
 
 

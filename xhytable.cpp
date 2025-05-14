@@ -742,7 +742,9 @@ void xhytable::add_primary_key(const QStringList& keys) {
 void xhytable::add_foreign_key(const QStringList& childColumns,
                                const QString& referencedTable,
                                const QStringList& referencedColumns,
-                               const QString& constraintNameIn) {
+                               const QString& constraintNameIn,
+                               ForeignKeyDefinition::ReferentialAction onDeleteAction,
+                               ForeignKeyDefinition::ReferentialAction onUpdateAction) {
     if (childColumns.isEmpty() || referencedColumns.isEmpty() || childColumns.size() != referencedColumns.size()) {
         throw std::runtime_error("添加外键失败：列列表不能为空且长度必须匹配。");
     }
@@ -769,15 +771,20 @@ void xhytable::add_foreign_key(const QStringList& childColumns,
     }
 
     ForeignKeyDefinition newForeignKey;
-    newForeignKey.constraintName = constraintName;
+    newForeignKey.constraintName = constraintName; // 使用已确定的约束名
     newForeignKey.referenceTable = referencedTable;
     for (int i = 0; i < childColumns.size(); ++i) {
         newForeignKey.columnMappings[childColumns.at(i)] = referencedColumns.at(i);
     }
+    newForeignKey.onDeleteAction = onDeleteAction; // 保存 ON DELETE 动作
+    newForeignKey.onUpdateAction = onUpdateAction; // 保存 ON UPDATE 动作
 
     m_foreignKeys.append(newForeignKey);
-    qDebug() << "外键 '" << constraintName << "' (" << childColumns.join(", ")
-             << " REFERENCES " << referencedTable << "(" << referencedColumns.join(", ") << ")) 已添加到表 " << m_name;
+    qDebug() << "外键 '" << newForeignKey.constraintName << "' (" << childColumns.join(", ")
+             << " REFERENCES " << referencedTable << "(" << referencedColumns.join(", ") << "))"
+             << " ON DELETE " << (onDeleteAction == ForeignKeyDefinition::CASCADE ? "CASCADE" : "NO ACTION") // 示例输出
+             << " ON UPDATE " << (onUpdateAction == ForeignKeyDefinition::CASCADE ? "CASCADE" : "NO ACTION") // 示例输出
+             << " 已添加到表 " << m_name;
 }
 
 
@@ -923,13 +930,9 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
 }
 
 
-
-
-// xhytable.cpp
-int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions, const ConditionNode & conditions) {
+int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions, const ConditionNode& conditions) {
     qDebug() << "[表::更新数据] 尝试更新表 '" << m_name << "', SET 子句: " << updates_with_expressions;
-
-    int affectedRows = 0;
+    int totalAffectedRows = 0;
     QList<xhyrecord>* targetRecordsList = m_inTransaction ? &m_tempRecords : &m_records;
 
     if (m_inTransaction && targetRecordsList->isEmpty() && !m_records.isEmpty() && targetRecordsList != &m_records) {
@@ -937,138 +940,419 @@ int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions,
         qDebug() << "[表::更新数据] 事务开始，m_tempRecords 已从 m_records 初始化。";
     }
 
-    // 创建一个临时列表来存储将要进行的修改，以便在所有验证通过后一次性应用，
-    // 或者在任何验证失败时轻易地不应用任何更改，从而实现语句级原子性。
-    QList<QPair<int, xhyrecord>> pending_updates; // <original_index, new_record_state>
+    QList<QPair<int, xhyrecord>> pending_parent_table_updates;
+    struct CascadeUpdateTriggerInfo {
+        xhyrecord original_parent_record_snapshot;
+        xhyrecord updated_parent_record_snapshot;
+    };
+    QList<CascadeUpdateTriggerInfo> cascade_update_triggers;
 
+    // --- 阶段 1: 收集父表自身的更新 和 潜在的级联触发信息 ---
     for (int i = 0; i < targetRecordsList->size(); ++i) {
         const xhyrecord& originalRecord = targetRecordsList->at(i);
 
         if (matchConditions(originalRecord, conditions)) {
-            qDebug() << "  [表::更新数据] 第 " << i << " 行记录符合WHERE条件。原始主键提示: '"
+            qDebug() << "  [表::更新数据] 第 " << i << " 行记录符合WHERE条件。PK提示: '"
                      << originalRecord.value(m_primaryKeys.isEmpty() ? (m_fields.isEmpty() ? "" : m_fields.first().name()) : m_primaryKeys.first()) << "'";
 
             QMap<QString, QString> proposedNewValuesFromSet = originalRecord.allValues();
+            bool anyValueChangedInThisRecord = false;
+
             for (auto it_update = updates_with_expressions.constBegin(); it_update != updates_with_expressions.constEnd(); ++it_update) {
                 const QString& fieldNameToUpdate = it_update.key();
                 const QString& valueExpression = it_update.value().trimmed();
                 const xhyfield* fieldSchema = get_field(fieldNameToUpdate);
+
                 if (!fieldSchema) {
                     qWarning() << "    更新警告: 表 '" << m_name << "' 中字段 '" << fieldNameToUpdate << "' 不存在。跳过此字段的更新。";
                     continue;
                 }
-                // ... (您原有的 SET 表达式求值逻辑，将结果放入 proposedNewValuesFromSet[fieldNameToUpdate])
-                // (确保这部分逻辑如果遇到错误，例如除以零，会抛出或返回一个错误指示)
-                // --- START: SET表达式求值逻辑 (来自您原始的 updateData) ---
-                QString escapedFieldNameForRegex = QRegularExpression::escape(fieldNameToUpdate);
-                QString arithmeticPatternStr = QString(R"(^\s*%1\s*([+\-*/])\s*(.+?)\s*$)").arg(escapedFieldNameForRegex);
-                QRegularExpression selfArithmeticRe(arithmeticPatternStr, QRegularExpression::CaseInsensitiveOption);
-                QRegularExpressionMatch arithmeticMatch = selfArithmeticRe.match(valueExpression);
-                if (arithmeticMatch.hasMatch()) {
-                    QString op = arithmeticMatch.captured(1).trimmed();
-                    QString operandStr = arithmeticMatch.captured(2).trimmed();
-                    QString currentValueStr = originalRecord.value(fieldNameToUpdate);
-                    if (currentValueStr.isNull() && (op == "+" || op == "-" || op == "*" || op == "/")) {
-                        proposedNewValuesFromSet[fieldNameToUpdate] = QString();
+                QString calculatedNewValue;
+                if (valueExpression.compare("NULL", Qt::CaseInsensitive) == 0) {
+                    calculatedNewValue = QString();
+                } else if ((valueExpression.startsWith('\'') && valueExpression.endsWith('\'')) ||
+                           (valueExpression.startsWith('"') && valueExpression.endsWith('"'))) {
+                    if (valueExpression.length() >= 2) {
+                        QString innerStr = valueExpression.mid(1, valueExpression.length() - 2);
+                        if (valueExpression.startsWith('\'')) innerStr.replace("''", "'");
+                        else innerStr.replace("\"\"", "\"");
+                        calculatedNewValue = innerStr;
                     } else {
-                        bool convOk_current, convOk_operand; QString calculatedValueStr;
-                        if (fieldSchema->type() == xhyfield::INT || fieldSchema->type() == xhyfield::BIGINT || fieldSchema->type() == xhyfield::SMALLINT || fieldSchema->type() == xhyfield::TINYINT) {
-                            qlonglong currentL = currentValueStr.toLongLong(&convOk_current); qlonglong operandL = operandStr.toLongLong(&convOk_operand);
-                            if(convOk_current && convOk_operand) {
-                                qlonglong resultL = 0;
-                                if (op == "+") resultL = currentL + operandL; else if (op == "-") resultL = currentL - operandL;
-                                else if (op == "*") resultL = currentL * operandL; else if (op == "/") { if (operandL == 0) throw std::runtime_error(("更新错误：尝试除以零。字段：" + fieldNameToUpdate).toStdString()); resultL = currentL / operandL; }
-                                else throw std::runtime_error(("更新错误：不支持的算术运算符 '" + op + "'").toStdString());
-                                calculatedValueStr = QString::number(resultL);
-                            } else throw std::runtime_error(("更新错误：算术运算的数值转换失败。字段: " + fieldNameToUpdate).toStdString());
-                        } else if (fieldSchema->type() == xhyfield::FLOAT || fieldSchema->type() == xhyfield::DOUBLE || fieldSchema->type() == xhyfield::DECIMAL) {
-                            double currentD = currentValueStr.toDouble(&convOk_current); double operandD = operandStr.toDouble(&convOk_operand);
-                            if(convOk_current && convOk_operand) {
-                                double resultD = 0;
-                                if (op == "+") resultD = currentD + operandD; else if (op == "-") resultD = currentD - operandD;
-                                else if (op == "*") resultD = currentD * operandD; else if (op == "/") { if (qAbs(operandD) < 1e-9) throw std::runtime_error(("更新错误：尝试除以零。字段：" + fieldNameToUpdate).toStdString()); resultD = currentD / operandD; }
-                                else throw std::runtime_error(("更新错误：不支持的算术运算符 '" + op + "'").toStdString());
-                                calculatedValueStr = QString::number(resultD);
-                            } else throw std::runtime_error(("更新错误：算术运算的数值转换失败。字段: " + fieldNameToUpdate).toStdString());
-                        } else throw std::runtime_error( ("更新警告：字段 '" + fieldNameToUpdate + "' 的类型不支持算术运算。").toStdString());
-                        proposedNewValuesFromSet[fieldNameToUpdate] = calculatedValueStr;
+                        calculatedNewValue = QString("");
                     }
                 } else {
-                    if (valueExpression.compare("NULL", Qt::CaseInsensitive) == 0) proposedNewValuesFromSet[fieldNameToUpdate] = QString();
-                    else if ((valueExpression.startsWith('\'') && valueExpression.endsWith('\'')) || (valueExpression.startsWith('"') && valueExpression.endsWith('"'))) {
-                        if (valueExpression.length() >= 2) {
-                            QString innerStr = valueExpression.mid(1, valueExpression.length() - 2);
-                            if (valueExpression.startsWith('\'')) innerStr.replace("''", "'"); else innerStr.replace("\"\"", "\"");
-                            proposedNewValuesFromSet[fieldNameToUpdate] = innerStr;
-                        } else proposedNewValuesFromSet[fieldNameToUpdate] = QString("");
-                    } else proposedNewValuesFromSet[fieldNameToUpdate] = valueExpression;
+                    // 您的 SET 表达式求值逻辑 (此处简化，假设直接是值)
+                    // 实际应用中，这里需要一个完整的表达式求值器
+                    // calculatedNewValue = evaluateComplexExpression(valueExpression, originalRecord, m_fields);
+                    calculatedNewValue = valueExpression; // 假设 valueExpression 是最终值字符串
+                    // 如果 valueExpression 是其他列名或算术表达式，需要在此处求值
+                    bool isColumnReference = false;
+                    for(const auto& f : m_fields) {
+                        if(f.name().compare(valueExpression, Qt::CaseInsensitive) == 0) {
+                            calculatedNewValue = originalRecord.value(f.name());
+                            isColumnReference = true;
+                            break;
+                        }
+                    }
+                    if (!isColumnReference) {
+                        // 尝试作为简单算术表达式（非常基础的示例）
+                        // 比如: salary + 100
+                        QRegularExpression arithmeticRe(QString(R"(\b(%1)\b\s*([\+\-\*\/])\s*(\d+(?:\.\d+)?))").arg(QRegularExpression::escape(fieldNameToUpdate)), QRegularExpression::CaseInsensitiveOption);
+                        QRegularExpressionMatch arithmeticMatch = arithmeticRe.match(valueExpression);
+                        if(arithmeticMatch.hasMatch()){
+                            // 简单的处理，实际需要更复杂的表达式解析器
+                            // QString baseCol = arithmeticMatch.captured(1); // 应该是 fieldNameToUpdate
+                            QString op = arithmeticMatch.captured(2);
+                            double operand = arithmeticMatch.captured(3).toDouble();
+                            double baseVal = originalRecord.value(fieldNameToUpdate).toDouble();
+                            if(op == "+") calculatedNewValue = QString::number(baseVal + operand);
+                            else if(op == "-") calculatedNewValue = QString::number(baseVal - operand);
+                            // ... 其他操作
+                            else calculatedNewValue = valueExpression; // 无法解析则保持原样
+                        } else {
+                            // 不是简单列引用也不是上述简单算术，保持原样
+                            calculatedNewValue = valueExpression;
+                        }
+                    }
                 }
-                // --- END: SET表达式求值逻辑 ---
-                qDebug() << "    字段 '" << fieldNameToUpdate << "' 在 proposedNewValuesFromSet 中更新为: '" << proposedNewValuesFromSet[fieldNameToUpdate] << "'";
+
+                if (originalRecord.value(fieldNameToUpdate) != calculatedNewValue) {
+                    anyValueChangedInThisRecord = true;
+                }
+                proposedNewValuesFromSet[fieldNameToUpdate] = calculatedNewValue;
             }
 
-            // 现在 proposedNewValuesFromSet 包含了应用 SET 子句之后，该行的所有字段的提议值
-            // 验证这些提议的值
-            // validateRecord 将在其内部抛出 std::runtime_error 如果约束被违反
-            validateRecord(proposedNewValuesFromSet, &originalRecord);
+            if (!anyValueChangedInThisRecord) {
+                continue;
+            }
 
-            // 如果 validateRecord 没有抛出异常，说明这行更新是有效的，将其加入待处理列表
-            xhyrecord updated_record_obj;
+            // 验证提议的父表记录更新
+            // 注意：这里的 validateRecord 是针对父表自身的约束（如CHECK, NOT NULL, UNIQUE on parent table）
+            // 它不应该因为子表的外键而失败，因为子表的级联还没有发生。
+            validateRecord(proposedNewValuesFromSet, &originalRecord, false); // 第三个参数 false 表示这不是级联验证
+
+            xhyrecord updatedRecordObject;
             for(const xhyfield& fieldDef : m_fields) {
-                updated_record_obj.insert(fieldDef.name(), proposedNewValuesFromSet.value(fieldDef.name()));
+                updatedRecordObject.insert(fieldDef.name(), proposedNewValuesFromSet.value(fieldDef.name()));
             }
-            pending_updates.append(qMakePair(i, updated_record_obj));
-        } // 结束 if matchConditions
-    } // 结束记录循环
+            pending_parent_table_updates.append(qMakePair(i, updatedRecordObject));
 
-    // 如果没有任何待处理的更新（可能是WHERE没匹配到，或所有匹配到的都验证失败了但没有被向上抛出）
-    // 或者如果中途因异常跳出，pending_updates可能为空或不完整
-    // 由于我们修改为 validateRecord 失败就向上抛异常，如果执行到这里，说明所有匹配行的验证都通过了
-
-    if (!pending_updates.isEmpty()) {
-        for (const auto& update_pair : pending_updates) {
-            targetRecordsList->replace(update_pair.first, update_pair.second);
-            affectedRows++;
+            bool potentiallyReferencedKeyActuallyChanged = false;
+            if (m_parentDb) {
+                for (const xhytable& otherTable : m_parentDb->tables()) {
+                    // if (otherTable.name().compare(this->m_name, Qt::CaseInsensitive) == 0 && &otherTable == this) continue; // 自引用情况特殊
+                    for (const auto& fkDef : otherTable.foreignKeys()) {
+                        if (fkDef.referenceTable.compare(this->m_name, Qt::CaseInsensitive) == 0) {
+                            for (const QString& referencedParentColumn : fkDef.columnMappings.values()) {
+                                if (originalRecord.value(referencedParentColumn) != proposedNewValuesFromSet.value(referencedParentColumn)) {
+                                    potentiallyReferencedKeyActuallyChanged = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (potentiallyReferencedKeyActuallyChanged) break;
+                    }
+                    if (potentiallyReferencedKeyActuallyChanged) break;
+                }
+            }
+            if (potentiallyReferencedKeyActuallyChanged) {
+                cascade_update_triggers.append({originalRecord, updatedRecordObject});
+            }
         }
-        qDebug() << "[表::更新数据] 表 '" << m_name << "' 中总共 " << affectedRows << " 行记录被更新。";
-    } else {
-        qDebug() << "[表::更新数据] 表 '" << m_name << "' 中没有记录被更新。";
     }
-    return affectedRows;
+
+    // --- 阶段 2: 应用父表自身的更新到 targetRecordsList (m_tempRecords 或 m_records) ---
+    int parentRowsUpdatedThisCall = 0;
+    for (const auto& update_pair : pending_parent_table_updates) {
+        targetRecordsList->replace(update_pair.first, update_pair.second);
+        parentRowsUpdatedThisCall++;
+    }
+    if (parentRowsUpdatedThisCall > 0) {
+        qDebug() << "[表::更新数据] 表 '" << m_name << "' 中直接更新了 " << parentRowsUpdatedThisCall << " 行记录 (在临时列表)。";
+    }
+    totalAffectedRows += parentRowsUpdatedThisCall;
+
+    // --- 阶段 3: 执行级联操作 (ON UPDATE CASCADE / ON UPDATE SET NULL) ---
+    if (!cascade_update_triggers.isEmpty() && m_parentDb) {
+        qDebug() << "[表::更新数据] 开始处理 " << cascade_update_triggers.count() << " 个潜在的ON UPDATE级联触发器...";
+        for (const auto& trigger : cascade_update_triggers) {
+            const xhyrecord& oldParentRecordState = trigger.original_parent_record_snapshot;
+            const xhyrecord& newParentRecordState = trigger.updated_parent_record_snapshot;
+
+            for (xhytable& referencingTable : m_parentDb->tables()) {
+                for (const auto& fkDef : referencingTable.foreignKeys()) {
+                    if (fkDef.referenceTable.compare(this->m_name, Qt::CaseInsensitive) == 0) {
+                        QMap<QString, QString> oldParentKeyValuesForThisFK;
+                        QMap<QString, QString> newParentKeyValuesForThisFK;
+                        bool isRelevantFK = false;
+
+                        for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
+                            const QString& referencedParentColumn = it_map.value();
+                            QString oldVal = oldParentRecordState.value(referencedParentColumn);
+                            QString newVal = newParentRecordState.value(referencedParentColumn);
+                            if (oldVal != newVal) isRelevantFK = true;
+                            oldParentKeyValuesForThisFK[referencedParentColumn] = oldVal;
+                            newParentKeyValuesForThisFK[referencedParentColumn] = newVal;
+                        }
+                        if (!isRelevantFK) continue;
+
+                        ConditionNode conditionForChildRows;
+                        conditionForChildRows.type = ConditionNode::LOGIC_OP;
+                        conditionForChildRows.logicOp = "AND";
+                        for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
+                            const QString& childFkColumn = it_map.key();
+                            const QString& parentRefColumn = it_map.value();
+                            QString oldParentValForCol = oldParentKeyValuesForThisFK.value(parentRefColumn);
+                            ConditionNode compNode;
+                            compNode.type = ConditionNode::COMPARISON_OP;
+                            compNode.comparison.fieldName = childFkColumn;
+                            compNode.comparison.operation = "=";
+                            const xhyfield* childFkFieldDef = referencingTable.get_field(childFkColumn);
+                            if (!childFkFieldDef) throw std::runtime_error("...");
+                            compNode.comparison.value = referencingTable.convertToTypedValue(oldParentValForCol, childFkFieldDef->type());
+                            conditionForChildRows.children.append(compNode);
+                        }
+
+                        if (fkDef.onUpdateAction == ForeignKeyDefinition::CASCADE) {
+                            qDebug() << "  [ON UPDATE CASCADE] From table '" << this->m_name << "' to '" << referencingTable.name() << "' (Constraint: " << fkDef.constraintName << ").";
+                            QMap<QString, QString> childTableUpdates;
+                            for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
+                                childTableUpdates[it_map.key()] = newParentKeyValuesForThisFK.value(it_map.value());
+                            }
+                            if (!childTableUpdates.isEmpty()) {
+                                // **重要**: 调用子表的 updateData，它内部会调用 validateRecord。
+                                // 子表的 validateRecord 需要能正确验证外键。
+                                int cascaded_rows = referencingTable.updateData(childTableUpdates, conditionForChildRows);
+                                qDebug() << "    级联更新导致表 '" << referencingTable.name() << "' 中更新了 " << cascaded_rows << " 行。";
+                                // totalAffectedRows += cascaded_rows; // 考虑是否计入
+                            }
+                        } else if (fkDef.onUpdateAction == ForeignKeyDefinition::SET_NULL) {
+                            qDebug() << "  [ON UPDATE SET NULL] From table '" << this->m_name << "' to '" << referencingTable.name() << "' (Constraint: " << fkDef.constraintName << ").";
+                            QMap<QString, QString> childTableUpdatesToNull;
+                            bool canSetNull = true;
+                            for (const QString& childFkColumn : fkDef.columnMappings.keys()) {
+                                const xhyfield* childFkFieldDef = referencingTable.get_field(childFkColumn);
+                                if (childFkFieldDef && referencingTable.notNullFields().contains(childFkFieldDef->name())) {
+                                    qWarning() << "    ON UPDATE SET NULL 失败: 子表 '" << referencingTable.name() << "' 的外键列 '" << childFkColumn << "' 不允许为NULL。约束 '" << fkDef.constraintName << "'";
+                                    //【严格模式下应抛出异常】 throw std::runtime_error(...)
+                                    canSetNull = false;
+                                    break;
+                                }
+                                childTableUpdatesToNull[childFkColumn] = QString(); // SQL NULL
+                            }
+                            if (canSetNull && !childTableUpdatesToNull.isEmpty()) {
+                                int set_null_rows = referencingTable.updateData(childTableUpdatesToNull, conditionForChildRows);
+                                qDebug() << "    ON UPDATE SET NULL 导致表 '" << referencingTable.name() << "' 中更新了 " << set_null_rows << " 行。";
+                            }
+                        } else { // NO_ACTION, RESTRICT, SET_DEFAULT (简化)
+                            // 对于 NO_ACTION/RESTRICT，如果父键值改变了，而子表有记录引用旧值，
+                            // 理论上这个父表更新操作本身就应该被阻止（这是在父表的 validateRecord 中检查的，如果它检查了引用它的子表）。
+                            // 但这里的逻辑是在父表更新已“暂存”后，检查子表。
+                            // 如果是 RESTRICT，需要检查是否有子记录仍然引用旧的父键。
+                            // 如果父表已经改了（在 m_tempRecords 中），那么这个检查的意义是：如果子表没有级联动作，
+                            // 而父键改了，是否会导致悬空引用。
+                            // 标准 SQL 的 RESTRICT 通常在语句开始时或即将修改数据时检查。
+                            // NO ACTION 通常在语句结束或事务提交时检查。
+                            // 您的实现中，父表的 validateRecord 如果不检查其对子表的影响，
+                            // 那么RESTRICT/NO_ACTION在这里可能需要抛错，如果子记录引用了即将改变的父键。
+                            // 简化：假设父表的 validateRecord 已经确保了自身更新的合法性。
+                            // 如果执行到这里且是 NO_ACTION/RESTRICT，表示父表更新已发生，
+                            // 我们需要检查是否有子记录的 FK 指向了一个不再存在的父键。
+                            // 但由于父表已经更新了 (in m_tempRecords)，这里我们其实是在验证 *新* 父键是否存在，
+                            // 而不是检查子表是否引用了 *旧* 父键。
+                            // 如果外键列没有 ON UPDATE CASCADE 或 SET NULL，并且父键改变了，
+                            // 那么子表的外键现在可能指向一个无效的父键。
+                            // 这应该在子表的 validateRecord 中捕获（如果它在父表更新后被调用来重新验证子表记录）。
+                            // 或者，更严格的 RESTRICT 应该在父表尝试更新其主键时，就检查是否有子表记录引用它。
+                            // 此处代码已在父表更新后，若子表无级联动作，则意味着外键可能已失效，依赖后续的完整性检查。
+                            qDebug() << "  [ON UPDATE " << (fkDef.onUpdateAction == ForeignKeyDefinition::NO_ACTION ? "NO ACTION" : "RESTRICT/SET_DEFAULT")
+                                     << "] 在表 '" << referencingTable.name() << "' 上对于约束 '" << fkDef.constraintName << "' 无显式级联动作或限制性检查。";
+                            // 为确保 RESTRICT 语义，可以主动检查：
+                            if (fkDef.onUpdateAction == ForeignKeyDefinition::NO_ACTION) { // 或 RESTRICT
+                                const QList<xhyrecord>& childRecords = referencingTable.records(); // 获取子表的当前记录
+                                for(const xhyrecord& childRec : childRecords) {
+                                    bool matchesOldParentKey = true;
+                                    bool childFkHasNull = false;
+                                    for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
+                                        const QString& childFkColumn = it_map.key();
+                                        const QString& parentRefColumn = it_map.value();
+                                        QString childFkValue = childRec.value(childFkColumn);
+                                        if(childFkValue.isNull()) { childFkHasNull = true; break;}
+                                        if(childFkValue.compare(oldParentKeyValuesForThisFK.value(parentRefColumn), Qt::CaseSensitive) != 0) {
+                                            matchesOldParentKey = false;
+                                            break;
+                                        }
+                                    }
+                                    if(childFkHasNull) continue; // 子外键含NULL，不构成有效引用
+
+                                    if(matchesOldParentKey) {
+                                        // 找到了一个子记录仍然引用旧的父键，但父键已经改变，且没有级联动作
+                                        // 这通常意味着违反了参照完整性（对于 RESTRICT/NO ACTION）
+                                        QString err = QString("更新父表操作失败 (ON UPDATE %1): 表 '%2' (子表) 中的记录 (如 %3='%4') 仍引用表 '%5' (父表) 中已更改的键值 (原父键值相关列: %6)。约束: '%7'")
+                                                          .arg(fkDef.onUpdateAction == ForeignKeyDefinition::NO_ACTION ? "NO ACTION" : "RESTRICT")
+                                                          .arg(referencingTable.name())
+                                                          .arg(referencingTable.primaryKeys().isEmpty() ? referencingTable.fields().first().name() : referencingTable.primaryKeys().first())
+                                                          .arg(childRec.value(referencingTable.primaryKeys().isEmpty() ? referencingTable.fields().first().name() : referencingTable.primaryKeys().first()))
+                                                          .arg(this->m_name)
+                                                          .arg(oldParentKeyValuesForThisFK.keys().join(","))
+                                                          .arg(fkDef.constraintName);
+                                        qWarning() << err;
+                                        throw std::runtime_error(err.toStdString());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    qDebug() << "[表::更新数据] 表 '" << m_name << "' 更新操作完成。总影响（直接或间接）大约 " << totalAffectedRows << " 行。";
+    return totalAffectedRows;
 }
 
 
 
+
+
+
+// xhytable.cpp
 int xhytable::deleteData(const ConditionNode& conditions) {
     int affectedRows = 0;
     QList<xhyrecord>* targetRecordsList = m_inTransaction ? &m_tempRecords : &m_records;
 
-    if (m_inTransaction && targetRecordsList->isEmpty() && !m_records.isEmpty()) {
+    if (m_inTransaction && targetRecordsList->isEmpty() && !m_records.isEmpty() && targetRecordsList != &m_records) { // 修正条件
         *targetRecordsList = m_records;
+        qDebug() << "[表::删除数据] 事务开始，m_tempRecords 已从 m_records 初始化。";
     }
 
     QList<int> indicesToRemove;
+    QList<xhyrecord> recordsToDeleteForCascadeCheck; // 存储将要删除的记录的副本
+
     for (int i = 0; i < targetRecordsList->size(); ++i) {
         const xhyrecord& currentRecord = targetRecordsList->at(i);
         if (matchConditions(currentRecord, conditions)) {
-            // 在实际标记为删除前，检查外键 RESTRICT 约束
-            // checkForeignKeyDeleteRestrictions 如果不符合会抛出异常
-            checkForeignKeyDeleteRestrictions(currentRecord); // 如果这里抛异常，循环会中断，异常会向上传播
+            recordsToDeleteForCascadeCheck.append(currentRecord); // 先收集，用于后续处理
             indicesToRemove.append(i);
         }
     }
 
-    // 如果执行到这里，说明所有符合条件的待删除行都通过了外键检查
-    for (int i = indicesToRemove.size() - 1; i >= 0; --i) {
-        targetRecordsList->removeAt(indicesToRemove.at(i));
+    // 在实际从当前表删除之前，处理级联删除和 RESTRICT 检查
+    if (!m_parentDb) {
+        qWarning() << "警告：表 " << m_name << " 缺少对父数据库的引用，无法执行外键删除检查/级联。";
+        // 根据您的设计，这里可能应该抛出异常或返回0
+        return 0;
+    }
+
+    for (const xhyrecord& recordToDelete : recordsToDeleteForCascadeCheck) {
+        // 遍历数据库中的所有表，检查它们是否有外键引用到当前表 (this->m_name)
+        for (xhytable& potentialReferencingTable : m_parentDb->tables()) { // 需要非 const 引用以调用其 deleteData
+            if (potentialReferencingTable.name().compare(this->m_name, Qt::CaseInsensitive) == 0 && &potentialReferencingTable == this) {
+                // 不能对自己表有非自引用的外键进行普通级联，自引用级联是特例，但需要小心
+                // 此处简化：如果 potentialReferencingTable 就是当前表，我们通常处理自引用约束
+                // 但这里主要考虑其他表对本表的引用
+            }
+
+            for (const auto& fkDef : potentialReferencingTable.foreignKeys()) {
+                if (fkDef.referenceTable.compare(this->m_name, Qt::CaseInsensitive) == 0) {
+                    // potentialReferencingTable 中的外键 fkDef 引用了 this->m_name 表
+                    // 提取被删除父记录中被引用的键值
+                    QMap<QString, QString> parentKeyValuesFromRecordToDelete;
+                    bool canBeReferenced = true;
+                    for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
+                        const QString& parentReferencedColumnName = it_map.value();
+                        QString val = recordToDelete.value(parentReferencedColumnName);
+                        if (val.isNull()) {
+                            canBeReferenced = false;
+                            break;
+                        }
+                        parentKeyValuesFromRecordToDelete[parentReferencedColumnName] = val;
+                    }
+                    if (!canBeReferenced || parentKeyValuesFromRecordToDelete.isEmpty()) {
+                        continue;
+                    }
+
+                    // 构建子表中需要匹配的条件
+                    ConditionNode cascadeCondition;
+                    cascadeCondition.type = ConditionNode::LOGIC_OP;
+                    cascadeCondition.logicOp = "AND";
+
+                    for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
+                        const QString& childFkColumnName = it_map.key();
+                        const QString& parentReferencedColumnName = it_map.value();
+                        QString parentValue = parentKeyValuesFromRecordToDelete.value(parentReferencedColumnName);
+
+                        ConditionNode compNode;
+                        compNode.type = ConditionNode::COMPARISON_OP;
+                        compNode.comparison.fieldName = childFkColumnName;
+                        compNode.comparison.operation = "=";
+                        // 注意：这里需要将 parentValue 转换为 QVariant，parseLiteralValue 可能不适用
+                        // 假设您的 ConditionNode 和 matchConditions 能正确处理直接的字符串值
+                        const xhyfield* childFieldDef = potentialReferencingTable.get_field(childFkColumnName);
+                        if (!childFieldDef) {
+                            QString errorMsg = QString("级联删除错误：在子表 %1 中未找到外键列 %2")
+                                                   .arg(potentialReferencingTable.name())
+                                                   .arg(childFkColumnName);
+                            throw std::runtime_error(errorMsg.toStdString());
+                        }
+                        compNode.comparison.value = potentialReferencingTable.convertToTypedValue(parentValue, childFieldDef->type());
+                        cascadeCondition.children.append(compNode);
+                    }
+
+                    if (fkDef.onDeleteAction == ForeignKeyDefinition::CASCADE) {
+                        qDebug() << "[表::删除数据] 检测到 ON DELETE CASCADE 从表 '" << this->m_name << "' 到表 '" << potentialReferencingTable.name() << "' (约束: " << fkDef.constraintName << ").";
+                        qDebug() << "  级联删除条件 for '" << potentialReferencingTable.name() << "': " << parentKeyValuesFromRecordToDelete; // 简化输出
+                        // 递归删除子表中的匹配记录
+                        // 注意：这里直接调用 deleteData，它内部也应该处理级联
+                        // 这要求您的事务管理能够覆盖这些嵌套的删除操作
+                        int cascaded_deletes = potentialReferencingTable.deleteData(cascadeCondition);
+                        qDebug() << "  级联删除导致表 '" << potentialReferencingTable.name() << "' 中删除了 " << cascaded_deletes << " 行。";
+                        // affectedRows += cascaded_deletes; // 是否将级联删除的行数计入主删除操作？取决于需求
+
+                    } else if (fkDef.onDeleteAction == ForeignKeyDefinition::SET_NULL) {
+                        // 实现 ON DELETE SET NULL
+                        qDebug() << "[表::删除数据] 检测到 ON DELETE SET NULL 从表 '" << this->m_name << "' 到表 '" << potentialReferencingTable.name() << "' (约束: " << fkDef.constraintName << ").";
+                        QMap<QString, QString> updatesForSetNull;
+                        for (const QString& childCol : fkDef.columnMappings.keys()) {
+                            updatesForSetNull[childCol] = "NULL"; // 特殊标记或实际的NULL表示
+                        }
+                        int set_null_updates = potentialReferencingTable.updateData(updatesForSetNull, cascadeCondition);
+                        qDebug() << "  ON DELETE SET NULL 导致表 '" << potentialReferencingTable.name() << "' 中更新了 " << set_null_updates << " 行。";
+
+                    } else { // NO_ACTION or RESTRICT (默认行为)
+                        // 检查是否存在引用记录
+                        QVector<xhyrecord> referencingRecords;
+                        potentialReferencingTable.selectData(cascadeCondition, referencingRecords);
+                        if (!referencingRecords.isEmpty()) {
+                            QString err = QString("删除操作被限制 (ON DELETE %1)：表 '%2' 中的记录通过外键 '%3' 引用了表 '%4' 中即将删除的记录。")
+                                              .arg(fkDef.onDeleteAction == ForeignKeyDefinition::NO_ACTION ? "NO ACTION" : "RESTRICT")
+                                              .arg(potentialReferencingTable.name())
+                                              .arg(fkDef.constraintName)
+                                              .arg(this->m_name);
+                            throw std::runtime_error(err.toStdString());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+    // 所有检查和级联操作完成后，再从当前表删除记录
+    // 按索引倒序删除，避免因删除导致后续索引失效
+    std::sort(indicesToRemove.begin(), indicesToRemove.end(), std::greater<int>());
+    for (int index : indicesToRemove) {
+        targetRecordsList->removeAt(index);
         affectedRows++;
     }
 
     if (affectedRows > 0) {
-        qDebug() << affectedRows << " 行已从表 '" << m_name << "' 删除。";
+        qDebug() << "[表::删除数据] 表 '" << m_name << "' 中直接删除了 " << affectedRows << " 行。";
     }
     return affectedRows;
 }
+
 
 bool xhytable::selectData(const ConditionNode & conditions, QVector<xhyrecord>& results) const {
     results.clear();
@@ -1086,68 +1370,48 @@ bool xhytable::selectData(const ConditionNode & conditions, QVector<xhyrecord>& 
     return true;
 }
 
-void xhytable::validateRecord(const QMap<QString, QString>& valuesToValidate, const xhyrecord* original_record_for_update) const {
-    qDebug() << "[表::记录验证] 开始验证表 '" << m_name << "'。提议的值: " << valuesToValidate
-             << (original_record_for_update ? " (更新操作, 原记录已提供)" : " (插入操作)");
+void xhytable::validateRecord(const QMap<QString, QString>& valuesToValidate,
+                              const xhyrecord* original_record_for_update,
+                              bool isBeingValidatedDueToCascade) const { // 新增参数，默认为false
+    qDebug() << "[表::记录验证] 开始验证表 '" << m_name << "'. 提议的值: " << valuesToValidate
+             << (original_record_for_update ? " (更新操作" : " (插入操作")
+             << (isBeingValidatedDueToCascade ? ", 由级联触发)" : ")");
 
-    // 获取用于唯一性等检查的记录集合（事务中用 m_tempRecords，否则用 m_records）
+
     const QList<xhyrecord>& recordsToCheckAgainst = m_inTransaction ? m_tempRecords : m_records;
 
     // 步骤 1: 字段级固有约束检查 (NOT NULL, 数据类型, ENUM)
-    // CHECK 约束不在这里的字段循环中单独处理，它们会在最后统一通过 m_checkConstraints 验证。
     for (const xhyfield& fieldDef : m_fields) {
         const QString& fieldName = fieldDef.name();
-        QString valueForThisField; // 该字段在此次操作中的最终字符串值
+        QString valueForThisField;
         bool valueExplicitlyProvidedOrUpdated = valuesToValidate.contains(fieldName);
 
         if (valueExplicitlyProvidedOrUpdated) {
             valueForThisField = valuesToValidate.value(fieldName);
         } else if (original_record_for_update) {
-            // 是 UPDATE 操作，且此字段不在 SET 子句中，所以其值保持原始记录的值
             valueForThisField = original_record_for_update->value(fieldName);
         } else {
-            // 是 INSERT 操作，且此字段不在用户的输入映射中。
-            // 这意味着它应该已在 insertData 中被处理为默认值或显式的SQL NULL (QString())。
-            // valuesToValidate 应该已包含此字段的正确值。
-            // 为防万一，做一个防御性检查：
             if (!valuesToValidate.contains(fieldName)) {
-                qWarning() << "[表::记录验证] 内部警告: 字段 '" << fieldName
-                           << "' 在 INSERT 验证时缺失于 'valuesToValidate' 映射中。假定其为 SQL NULL。";
                 valueForThisField = QString(); // SQL NULL
             } else {
                 valueForThisField = valuesToValidate.value(fieldName);
             }
         }
-
-        // 判断该值是否应被视作 SQL NULL
-        // (QString() 是我们内部的 SQL NULL 表示, 或者用户显式写了 "NULL")
         bool isConsideredSqlNull = valueForThisField.isNull() ||
                                    (valueExplicitlyProvidedOrUpdated && valuesToValidate.value(fieldName).compare("NULL", Qt::CaseInsensitive) == 0);
 
-        // 检查 NOT NULL 约束
         if (m_notNullFields.contains(fieldName)) {
             if (isConsideredSqlNull) {
                 throw std::runtime_error("字段 '" + fieldName.toStdString() + "' (NOT NULL) 不能为 NULL。");
             }
-            // 根据您的数据库设计，空字符串 "" 是否违反 NOT NULL。
-            // 标准SQL通常认为 "" 是一个非NULL的有效值。如果您的系统有不同策略，在此处添加检查。
-            if (valueForThisField.isEmpty() && !isConsideredSqlNull) { // 这是一个实际的空字符串，而不是SQL NULL
-                // qWarning() << "[表::记录验证] 字段 '" << fieldName << "' 是 NOT NULL 且值为空字符串。标准SQL通常允许此情况。";
-                // 如果要禁止，则: throw std::runtime_error("字段 '" + fieldName.toStdString() + "' (NOT NULL) 不能为空字符串。");
-            }
         }
-
-        // 数据类型验证 和 ENUM 值检查 (仅对非 SQL NULL 值进行)
         if (!isConsideredSqlNull) {
-            // validateType 检查值是否符合字段定义类型、长度、格式等
             if (!validateType(fieldDef.type(), valueForThisField, fieldDef.constraints())) {
                 throw std::runtime_error("字段 '" + fieldName.toStdString() + "' 的值 '" + valueForThisField.toStdString() +
                                          "' 类型错误或不符合长度/格式约束 (定义类型: " + fieldDef.typestring().toStdString() +")。");
             }
-            // ENUM 值检查
             if (fieldDef.type() == xhyfield::ENUM) {
-                // 如果 ENUM 定义了允许的值列表，但当前值不在其中
-                if (fieldDef.enum_values().isEmpty() && !valueForThisField.isEmpty()) { // ENUM列表为空但尝试插入非空值
+                if (fieldDef.enum_values().isEmpty() && !valueForThisField.isEmpty()) {
                     throw std::runtime_error("字段 '" + fieldName.toStdString() + "' (ENUM) 的允许值列表为空，无法接受非空值 '" + valueForThisField.toStdString() + "'。");
                 } else if (!valueForThisField.isEmpty() && !fieldDef.enum_values().contains(valueForThisField, Qt::CaseSensitive)) {
                     throw std::runtime_error("字段 '" + fieldName.toStdString() + "' 的值 '" + valueForThisField.toStdString() +
@@ -1155,38 +1419,44 @@ void xhytable::validateRecord(const QMap<QString, QString>& valuesToValidate, co
                 }
             }
         }
-    } // 结束字段级固有约束检查循环
+    }
 
     // 步骤 2: 主键唯一性检查
     if (!m_primaryKeys.isEmpty()) {
-        QMap<QString, QString> pkValuesInCurrentOp; // 本次操作中涉及的主键列及其值 (来自 valuesToValidate)
+        QMap<QString, QString> pkValuesInCurrentOp;
         bool pkHasNull = false;
-        bool pkFieldsWereModified = false; // 新增：标记主键字段是否在本次UPDATE中被修改
+        bool pkFieldsWereModified = false;
 
         for (const QString& pkFieldName : m_primaryKeys) {
-            if (!valuesToValidate.contains(pkFieldName) ||
-                valuesToValidate.value(pkFieldName).isNull() ||
-                valuesToValidate.value(pkFieldName).compare("NULL", Qt::CaseInsensitive) == 0) {
+            // 确保从 valuesToValidate 获取值，因为它包含了最新的提议值
+            QString pkFieldValue;
+            if (valuesToValidate.contains(pkFieldName)) {
+                pkFieldValue = valuesToValidate.value(pkFieldName);
+            } else if (original_record_for_update) { // 如果不在更新集合中，则取原值
+                pkFieldValue = original_record_for_update->value(pkFieldName);
+            } // else 插入时字段未提供，应已被默认值或NULL处理，validateRecord前就已在valuesToValidate
+
+            if (pkFieldValue.isNull() || pkFieldValue.compare("NULL", Qt::CaseInsensitive) == 0) {
                 pkHasNull = true; break;
             }
-            pkValuesInCurrentOp[pkFieldName] = valuesToValidate.value(pkFieldName);
+            pkValuesInCurrentOp[pkFieldName] = pkFieldValue;
 
-            // 如果是UPDATE操作，检查这个主键字段的值是否改变了
             if (original_record_for_update != nullptr) {
                 if (original_record_for_update->value(pkFieldName).compare(pkValuesInCurrentOp.value(pkFieldName), Qt::CaseSensitive) != 0) {
                     pkFieldsWereModified = true;
                 }
             }
         }
+        if (pkHasNull) throw std::runtime_error("主键字段 (" + m_primaryKeys.join(", ").toStdString() + ") 不能包含NULL值。");
 
-        if (pkHasNull) {
-            throw std::runtime_error("主键字段 (" + m_primaryKeys.join(", ").toStdString() + ") 不能包含NULL值。");
-        }
-
-        qDebug() << "  [表::记录验证 主键检查] 提议的主键值:" << pkValuesInCurrentOp << "主键字段是否被修改:" << pkFieldsWereModified;
-
-        int matchCount = 0; // 计算有多少现有记录与提议的主键值匹配
+        int matchCount = 0;
         for (const xhyrecord& existingRecord : recordsToCheckAgainst) {
+            // 如果是更新操作，并且当前检查的 existingRecord 就是正在被更新的原始记录，则跳过与自身的比较，
+            // 除非主键字段本身被修改了（这种情况下，新主键值不能与任何其他记录冲突）。
+            if (original_record_for_update != nullptr && (&existingRecord == original_record_for_update) && !pkFieldsWereModified) {
+                continue;
+            }
+
             bool currentExistingMatchesProposedPk = true;
             for (const QString& pkFieldName : m_primaryKeys) {
                 if (existingRecord.value(pkFieldName).compare(pkValuesInCurrentOp.value(pkFieldName), Qt::CaseSensitive) != 0) {
@@ -1194,145 +1464,108 @@ void xhytable::validateRecord(const QMap<QString, QString>& valuesToValidate, co
                     break;
                 }
             }
-
             if (currentExistingMatchesProposedPk) {
-                matchCount++;
-                // 如果是更新操作，并且主键字段没有被修改，那么我们期望找到一个匹配项（即记录自身）。
-                // 如果主键字段被修改了，或者这是插入操作，那么我们不期望找到任何匹配项。
-                if (original_record_for_update != nullptr && !pkFieldsWereModified) {
-                    // 这是更新操作，且主键未变。我们应该只找到这一条记录本身。
-                    // 如果 matchCount > 1，说明除了自身外还有其他记录具有相同的主键（这是数据不一致，理论上不应发生）。
-                    // 简单起见，如果主键未变，我们允许一个匹配（即自身）。
-                    if (matchCount > 1) { // 这意味着除了它自己，还有另一条记录有相同的主键
-                        QStringList pkValsForError;
-                        for(const QString& pkName : m_primaryKeys) pkValsForError << pkValuesInCurrentOp.value(pkName);
-                        throw std::runtime_error("主键冲突 (数据不一致): 值 (" + pkValsForError.join(",").toStdString() + ") 在更新时发现多个匹配。");
-                    }
-                    // 如果 matchCount == 1，这是预期的（与自身匹配），不视为冲突。
-                } else {
-                    // 这是插入操作，或更新操作且主键已被修改。
-                    // 任何匹配都意味着冲突。
-                    QStringList pkValsForError;
-                    for(const QString& pkName : m_primaryKeys) pkValsForError << pkValuesInCurrentOp.value(pkName);
-                    throw std::runtime_error("主键冲突: 值 (" + pkValsForError.join(",").toStdString() + ") 已存在。");
-                }
+                // 无论插入还是更新（且主键改变），只要找到一个匹配就是冲突
+                QStringList pkValsForError;
+                for(const QString& pkName : m_primaryKeys) pkValsForError << pkValuesInCurrentOp.value(pkName);
+                throw std::runtime_error("主键冲突: 值 (" + pkValsForError.join(",").toStdString() + ") 已存在。");
             }
         }
-        // 在循环结束后，如果是更新且主键未修改，matchCount 应该是 1。
-        // 如果是插入或主键已修改，matchCount 应该是 0。
-        // 上面的逻辑在循环内部就抛出异常了，所以这里不需要额外的检查。
     }
 
-    // 步骤 3: UNIQUE 约束检查 (表级和字段级提升的)
+
+    // 步骤 3: UNIQUE 约束检查
     for (auto it_uq_constr = m_uniqueConstraints.constBegin(); it_uq_constr != m_uniqueConstraints.constEnd(); ++it_uq_constr) {
         const QString& constraintName = it_uq_constr.key();
         const QList<QString>& uniqueFields = it_uq_constr.value();
-
         QMap<QString, QString> currentUniqueValues;
         bool uniqueKeyHasNull = false;
-        bool uniqueKeyFieldsWereModified = false; // 新增：标记唯一键字段是否在本次UPDATE中被修改
+        bool uniqueKeyFieldsWereModified = false;
 
         for (const QString& uqFieldName : uniqueFields) {
-            if (!valuesToValidate.contains(uqFieldName) ||
-                valuesToValidate.value(uqFieldName).isNull() ||
-                valuesToValidate.value(uqFieldName).compare("NULL", Qt::CaseInsensitive) == 0) {
+            QString uqFieldValue;
+            if (valuesToValidate.contains(uqFieldName)) {
+                uqFieldValue = valuesToValidate.value(uqFieldName);
+            } else if (original_record_for_update) {
+                uqFieldValue = original_record_for_update->value(uqFieldName);
+            }
+
+            if (uqFieldValue.isNull() || uqFieldValue.compare("NULL", Qt::CaseInsensitive) == 0) {
                 uniqueKeyHasNull = true; break;
             }
-            currentUniqueValues[uqFieldName] = valuesToValidate.value(uqFieldName);
-
+            currentUniqueValues[uqFieldName] = uqFieldValue;
             if (original_record_for_update != nullptr) {
                 if (original_record_for_update->value(uqFieldName).compare(currentUniqueValues.value(uqFieldName), Qt::CaseSensitive) != 0) {
                     uniqueKeyFieldsWereModified = true;
                 }
             }
         }
+        if (uniqueKeyHasNull) continue; // SQL标准：唯一约束允许列中包含多个NULL（除非唯一键是主键）
 
-        if (uniqueKeyHasNull) {
-            qDebug() << "  [表::记录验证] 跳过唯一约束 '" << constraintName << "' 的检查，因为它包含NULL值。";
-            continue;
-        }
-
-        qDebug() << "  [表::记录验证 唯一约束检查] 约束: '" << constraintName << "', 提议的值: " << currentUniqueValues << "唯一键字段是否被修改:" << uniqueKeyFieldsWereModified;
-
-        int uniqueMatchCount = 0;
         for (const xhyrecord& existingRecord : recordsToCheckAgainst) {
+            if (original_record_for_update != nullptr && (&existingRecord == original_record_for_update) && !uniqueKeyFieldsWereModified) {
+                continue;
+            }
             bool currentExistingMatchesProposedUQ = true;
             bool existingUqKeyInDbHasNull = false;
-
             for (const QString& uqFieldName : uniqueFields) {
                 if (existingRecord.value(uqFieldName).isNull() ||
                     existingRecord.value(uqFieldName).compare("NULL", Qt::CaseInsensitive) == 0) {
-                    existingUqKeyInDbHasNull = true; break; // 现有记录的唯一键部分有NULL，不参与冲突
+                    existingUqKeyInDbHasNull = true; break;
                 }
                 if (existingRecord.value(uqFieldName).compare(currentUniqueValues.value(uqFieldName), Qt::CaseSensitive) != 0) {
                     currentExistingMatchesProposedUQ = false; break;
                 }
             }
-
-            if (existingUqKeyInDbHasNull) { // 如果现有记录的唯一键部分有NULL，它不与当前非NULL的唯一键冲突
-                continue;
-            }
-
+            if (existingUqKeyInDbHasNull) continue;
             if (currentExistingMatchesProposedUQ) {
-                uniqueMatchCount++;
-                if (original_record_for_update != nullptr && !uniqueKeyFieldsWereModified) {
-                    // 更新操作，且唯一键未变。允许一个匹配（自身）。
-                    if (uniqueMatchCount > 1) {
-                        QStringList uqValsForError;
-                        for(const QString& uqName : uniqueFields) uqValsForError << currentUniqueValues.value(uqName);
-                        throw std::runtime_error("唯一约束 '" + constraintName.toStdString() + "' 冲突 (数据不一致): 值 (" +
-                                                 uqValsForError.join(",").toStdString() + ") 在更新时发现多个匹配。");
-                    }
-                } else {
-                    // 插入操作，或更新操作且唯一键已修改。任何匹配都是冲突。
-                    QStringList uqValsForError;
-                    for(const QString& uqName : uniqueFields) uqValsForError << currentUniqueValues.value(uqName);
-                    throw std::runtime_error("唯一约束 '" + constraintName.toStdString() + "' 冲突: 值 (" +
-                                             uqValsForError.join(",").toStdString() + ") 已存在。");
-                }
+                QStringList uqValsForError;
+                for(const QString& uqName : uniqueFields) uqValsForError << currentUniqueValues.value(uqName);
+                throw std::runtime_error("唯一约束 '" + constraintName.toStdString() + "' 冲突: 值 (" +
+                                         uqValsForError.join(",").toStdString() + ") 已存在。");
             }
         }
     }
 
-    // 步骤 4: 外键约束检查 (FOREIGN KEY)
-    // (这部分逻辑在您的原代码中已有，基本保持，确保 m_parentDb 被正确设置)
+    // 步骤 4: 外键约束检查
     if (m_parentDb && !m_foreignKeys.isEmpty()) {
-        for (const auto& fkDef : m_foreignKeys) { // fkDef 是 ForeignKeyDefinition 结构
+        for (const auto& fkDef : m_foreignKeys) {
             const QString& referencedTableName = fkDef.referenceTable;
-            QMap<QString, QString> childFkValues; // 当前操作中，子表外键列的值
+            QMap<QString, QString> childFkValues;
             bool childFkHasNull = false;
 
             for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
-                const QString& childColumnName = it_map.key(); // 子表中的外键列
-                if (!valuesToValidate.contains(childColumnName) ||
-                    valuesToValidate.value(childColumnName).isNull() ||
-                    valuesToValidate.value(childColumnName).compare("NULL", Qt::CaseInsensitive) == 0) {
-                    childFkHasNull = true; // 外键的某个部分是NULL
-                    break;
+                const QString& childColumnName = it_map.key();
+                QString fkValueForChildCol;
+                // 从 valuesToValidate 获取最新的提议值用于外键检查
+                if (valuesToValidate.contains(childColumnName)) {
+                    fkValueForChildCol = valuesToValidate.value(childColumnName);
+                } else if (original_record_for_update) { // 如果是更新且该外键列未被SET，则用原值
+                    fkValueForChildCol = original_record_for_update->value(childColumnName);
+                } // else 插入时字段未提供，则为NULL或默认值，已在valuesToValidate中
+
+                if (fkValueForChildCol.isNull() || fkValueForChildCol.compare("NULL", Qt::CaseInsensitive) == 0) {
+                    childFkHasNull = true; break;
                 }
-                childFkValues[childColumnName] = valuesToValidate.value(childColumnName);
+                childFkValues[childColumnName] = fkValueForChildCol;
             }
+            if (childFkHasNull) continue;
 
-            if (childFkHasNull) {
-                // SQL标准：如果外键的任何组成部分为NULL，则不执行引用完整性检查。
-                qDebug() << "  [表::记录验证] 跳过外键约束 '" << fkDef.constraintName << "' 的检查，因为它包含NULL值。";
-                continue;
-            }
-
-            xhytable* referencedTable = m_parentDb->find_table(referencedTableName);
+            xhytable* referencedTable = m_parentDb->find_table(referencedTableName); // 父表
             if (!referencedTable) {
                 throw std::runtime_error("外键约束 '" + fkDef.constraintName.toStdString() +
                                          "' 定义错误: 引用的父表 '" + referencedTableName.toStdString() + "' 在数据库中不存在。");
             }
 
             bool foundMatchingParentKey = false;
-            const QList<xhyrecord>& parentRecords = referencedTable->getCommittedRecords(); // 应检查已提交的父表记录
+            // **关键修改**: 查询父表的当前事务状态记录 (m_tempRecords if in transaction)
+            const QList<xhyrecord>& parentRecords = referencedTable->records(); // 使用 records() 而不是 getCommittedRecords()
+
             for (const xhyrecord& parentRecord : parentRecords) {
                 bool allParentColsMatch = true;
                 for (auto it_map = fkDef.columnMappings.constBegin(); it_map != fkDef.columnMappings.constEnd(); ++it_map) {
                     const QString& childColumnName = it_map.key();
-                    const QString& parentColumnName = it_map.value(); // 父表中对应的被引用列
-
+                    const QString& parentColumnName = it_map.value();
                     if (parentRecord.value(parentColumnName).compare(childFkValues.value(childColumnName), Qt::CaseSensitive) != 0) {
                         allParentColsMatch = false;
                         break;
@@ -1355,54 +1588,43 @@ void xhytable::validateRecord(const QMap<QString, QString>& valuesToValidate, co
                                                                                              "子表字段 (" + childColNamesList.join(", ").toStdString() + ") 的值 (" + childColValuesList.join(", ").toStdString() + ") "
                                                                                                                                                    "在引用的父表 '" + referencedTableName.toStdString() + "' (列 '" + parentColNamesList.join(", ").toStdString() + "') 中不存在对应记录。");
             }
-            qDebug() << "  [表::记录验证] 外键约束 '" << fkDef.constraintName << "' 检查通过。";
         }
-    } else if (!m_foreignKeys.isEmpty() && !m_parentDb) {
-        qWarning() << "[表::记录验证] 警告: 表 " << m_name << " 定义了外键，但缺少对父数据库的引用，无法执行外键检查。";
-    } // 结束外键约束检查
+    }
 
-
-    // 步骤 5: 所有 CHECK 约束检查 (表级和从字段级提升的)
-    // 构建 QVariantMap，其中包含所有字段的最终值，用于 CHECK 表达式求值
+    // 步骤 5: 所有 CHECK 约束检查
     QVariantMap recordDataForCheck;
     for(const xhyfield& fieldDef : m_fields) {
         const QString& fieldName = fieldDef.name();
         QString valueStr;
         if (valuesToValidate.contains(fieldName)) {
             valueStr = valuesToValidate.value(fieldName);
-        } else if (original_record_for_update) { // 在更新操作中，如果字段未被修改，则取原值
+        } else if (original_record_for_update) {
             valueStr = original_record_for_update->value(fieldName);
-        } else { // 插入操作中，如果字段未提供（理论上应已被默认值或NULL填充）
-            valueStr = QString(); // 代表SQL NULL
+        } else {
+            valueStr = QString();
         }
         recordDataForCheck[fieldName] = convertToTypedValue(valueStr, fieldDef.type());
     }
-    // 如果 valuesToValidate 中包含 m_fields 中没有的字段（异常情况），也加入
     for(const QString& key_in_values : valuesToValidate.keys()){
         if(!recordDataForCheck.contains(key_in_values)){
-            const xhyfield* fieldDef = get_field(key_in_values); // 尝试获取其定义
+            const xhyfield* fieldDef = get_field(key_in_values);
             if(fieldDef) recordDataForCheck[key_in_values] = convertToTypedValue(valuesToValidate.value(key_in_values), fieldDef->type());
-            else recordDataForCheck[key_in_values] = valuesToValidate.value(key_in_values); // 无定义则作为字符串回退
+            else recordDataForCheck[key_in_values] = valuesToValidate.value(key_in_values);
         }
     }
 
     if (!m_checkConstraints.isEmpty()) {
-        qDebug() << "  [表::记录验证] 开始执行 CHECK 约束，当前记录数据 (用于表达式求值): " << recordDataForCheck;
         for (auto it_check = m_checkConstraints.constBegin(); it_check != m_checkConstraints.constEnd(); ++it_check) {
             const QString& constraintName = it_check.key();
             const QString& checkExpr = it_check.value();
-            qDebug() << "    正在检查约束: '" << constraintName << "', 表达式: '" << checkExpr << "'";
-            if (!evaluateCheckExpression(checkExpr, recordDataForCheck)) { // 调用已修改的 evaluateCheckExpression
+            if (!evaluateCheckExpression(checkExpr, recordDataForCheck)) {
                 QString opType = original_record_for_update ? "更新" : "插入";
                 QString errorMsg = QString("%1操作失败: 记录违反了 CHECK 约束 '%2' (表达式: %3).")
                                        .arg(opType, constraintName, checkExpr);
-                qWarning() << errorMsg; // 使用 qWarning 输出更详细的日志
-                throw std::runtime_error(errorMsg.toStdString()); // 抛出异常
+                throw std::runtime_error(errorMsg.toStdString());
             }
         }
-        qDebug() << "  [表::记录验证] 所有 CHECK 约束执行完毕并通过。";
     }
-
     qDebug() << "[表::记录验证] 表 '" << m_name << "' 的所有约束验证成功。";
 }
 

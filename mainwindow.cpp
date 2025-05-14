@@ -3515,7 +3515,7 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
         textBuffer.append(QString("错误: 数据库 '%1' 不存在。").arg(db_name));
         return;
     }
-    xhytable* table = db->find_table(table_name);
+    xhytable* table = db->find_table(table_name); // 注意：这里获取的是非 const 指针
 
     if (!table) {
         textBuffer.append(QString("错误: 表 '%1' 在数据库 '%2' 中不存在。").arg(table_name, db_name));
@@ -3524,88 +3524,65 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
     QString output_str;
     output_str += QString("表 '%1.%2' 的结构:\n").arg(db_name, table_name);
 
-    // 调整列宽以适应你的截图和内容
-    int colNameWidth = 20;     // 例如 "StockQuantity"
-    int typeWidth = 28;        // 例如 "VARCHAR(50)", "DECIMAL(10,2)"
-    int constraintWidth = 45;  // 例如 "NOT NULL UNIQUE DEFAULT 'value'"
+    int colNameWidth = 20;
+    int typeWidth = 28;
+    int constraintWidth = 45;
 
-    // 表头格式化 (表头不截断)
     output_str += padToVisualWidth("列名", colNameWidth, false) + " " +
                   padToVisualWidth("类型", typeWidth, false) + " " +
                   padToVisualWidth("约束", constraintWidth, false) + "\n";
-    output_str += QString(colNameWidth + typeWidth + constraintWidth + 2, '-') + "\n"; // +2 for spaces
+    output_str += QString(colNameWidth + typeWidth + constraintWidth + 2, '-') + "\n";
 
     const QMap<QString, QString>& default_values_map = table->defaultValues();
     const QStringList& primary_keys_list = table->primaryKeys();
     const QSet<QString>& not_null_fields_set = table->notNullFields();
+    const QMap<QString, QList<QString>>& table_unique_constraints = table->uniqueConstraints();
 
-    for (const auto& field : table->fields()) {
-        QStringList display_constraints_for_field; // 存储从 field.constraints() 解析的非参数约束
-        const QStringList& raw_field_constraints = field.constraints();
 
-        for (int i = 0; i < raw_field_constraints.size(); ++i) {
-            const QString& constr_str = raw_field_constraints.at(i);
-            if (constr_str.compare("DEFAULT", Qt::CaseInsensitive) == 0) {
-                i++; // 跳过 DEFAULT 关键字后的值，它将在后面单独处理
-                continue;
-            }
-            if (constr_str.startsWith("SIZE(", Qt::CaseInsensitive) ||
-                constr_str.startsWith("PRECISION(", Qt::CaseInsensitive) ||
-                constr_str.startsWith("SCALE(", Qt::CaseInsensitive)) {
-                continue;
-            }
-            display_constraints_for_field.append(constr_str);
-        }
-
-        bool is_primary_key_from_table = primary_keys_list.contains(field.name(), Qt::CaseInsensitive);
-        bool is_not_null_from_table_set = not_null_fields_set.contains(field.name());
-
+    for (const xhyfield& field : table->fields()) { // 使用 const auto&
         QStringList final_display_constraints_parts;
 
-        if (is_primary_key_from_table) {
+        // 1. 主键
+        if (primary_keys_list.contains(field.name(), Qt::CaseInsensitive)) {
             final_display_constraints_parts.append("PRIMARY KEY");
         }
-        // 如果是 NOT NULL 且不是主键（主键已隐含 NOT NULL）
-        if (is_not_null_from_table_set && !is_primary_key_from_table) {
-            final_display_constraints_parts.append("NOT NULL");
-        }
 
-        // 添加字段级的 UNIQUE 和 CHECK
-        for(const QString& field_specific_constr : display_constraints_for_field) {
-            if (field_specific_constr.compare("PRIMARY_KEY", Qt::CaseInsensitive) == 0 ||
-                field_specific_constr.compare("NOT_NULL", Qt::CaseInsensitive) == 0 ||
-                field_specific_constr.compare("NOT NULL", Qt::CaseInsensitive) == 0) {
-                continue; // 已被统一处理
-            }
-            // 只添加字段级 UNIQUE，表级 UNIQUE 在后面单独处理
-            if (field_specific_constr.compare("UNIQUE", Qt::CaseInsensitive) == 0) {
-                // 检查是否为真正的字段级单列 UNIQUE (非表级约束下放到字段的 UNIQUE)
-                // 一个简单的区分方法是检查 m_uniqueConstraints 是否包含此单字段的约束
-                bool isTableLevelSingleFieldUnique = false;
-                for(const auto& uq_list : table->uniqueConstraints().values()){
-                    if(uq_list.size() == 1 && uq_list.first().compare(field.name(), Qt::CaseInsensitive) == 0){
-                        // 如果表级唯一约束中存在仅包含此字段的约束，则字段行的UNIQUE可能是其体现
-                        // 这种情况下可以不在这里重复，等表级约束部分显示。
-                        // 但如果 xhytable::addfield 将字段级 UNIQUE 直接转为单列表级 UNIQUE，
-                        // 那么这里可能永远不会添加字段级的 UNIQUE。
-                        // 为简化，如果 field.constraints() 中有 UNIQUE，我们先加上。
-                        // 后续的 removeDuplicates 可以处理部分重复。
-                        isTableLevelSingleFieldUnique = true; // 假设它可能来自表级
-                        break;
-                    }
-                }
-                if(!isTableLevelSingleFieldUnique || !table->uniqueConstraints().values().contains(QStringList{field.name()})){
-                    final_display_constraints_parts.append("UNIQUE");
-                }
-            } else {
-                final_display_constraints_parts.append(field_specific_constr); // 如 CHECK(condition)
+        // 2. 非空
+        if (not_null_fields_set.contains(field.name())) {
+            if (!primary_keys_list.contains(field.name(), Qt::CaseInsensitive)) { // 主键已隐含非空
+                 final_display_constraints_parts.append("NOT NULL");
             }
         }
 
-        // 处理默认值
+        // 3. 字段级 UNIQUE (从 field.constraints()，通常代表由FieldBlock.integrities的UNIQUE位加载而来)
+        //    目的是显示那些不是通过表级 `CONSTRAINT UQ_NAME UNIQUE (col)` 定义的，
+        //    而是直接在列定义时 `col_type UNIQUE` 声明的。
+        if (field.constraints().contains("UNIQUE", Qt::CaseInsensitive)) {
+                   bool isCoveredByExplicitlyNamedTableLevelUnique = false;
+                   QString autoGeneratedConstraintName = "UQ_" + table->name().toUpper() + "_" + field.name().toUpper();
+
+                   for (auto it_tbl_uq = table_unique_constraints.constBegin();
+                        it_tbl_uq != table_unique_constraints.constEnd(); ++it_tbl_uq) {
+                       const QList<QString>& uq_cols = it_tbl_uq.value();
+                       if (uq_cols.size() == 1 && uq_cols.first().compare(field.name(), Qt::CaseInsensitive) == 0) {
+                           // 如果存在一个只包含此字段的表级UNIQUE，并且其名称 *不是* 自动生成的，
+                           // 那么我们就认为它是一个用户显式定义的表级约束，字段行就不再重复显示UNIQUE。
+                           if (it_tbl_uq.key().compare(autoGeneratedConstraintName, Qt::CaseInsensitive) != 0) {
+                               isCoveredByExplicitlyNamedTableLevelUnique = true;
+                               break;
+                           }
+                       }
+                   }
+                   if (!isCoveredByExplicitlyNamedTableLevelUnique) {
+                       final_display_constraints_parts.append("UNIQUE");
+                   }
+               }
+
+        // 4. 默认值
         if (default_values_map.contains(field.name())) {
             QString storedDefault = default_values_map.value(field.name());
             QString displayDefault;
+
             if (storedDefault == DefaultValueKeywords::SQL_NULL) {
                 displayDefault = "DEFAULT NULL";
             } else if (storedDefault == DefaultValueKeywords::CURRENT_TIMESTAMP_KW) {
@@ -3613,31 +3590,46 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
             } else if (storedDefault == DefaultValueKeywords::CURRENT_DATE_KW) {
                 displayDefault = "DEFAULT CURRENT_DATE";
             } else {
-                // (保持你原来的字面量默认值格式化逻辑)
                 bool isNumericOrBool = false;
                 bool okNum;
                 storedDefault.toDouble(&okNum);
-                if (okNum) { isNumericOrBool = true; }
-                else if (storedDefault.compare("true", Qt::CaseInsensitive) == 0 ||
-                         storedDefault.compare("false", Qt::CaseInsensitive) == 0) {
+                if (okNum && !storedDefault.contains(QRegularExpression("[^0-9.eE-]"))) { // 确保是纯数字，不是 '123x'
+                    isNumericOrBool = true;
+                } else if (storedDefault.compare("true", Qt::CaseInsensitive) == 0 ||
+                           storedDefault.compare("false", Qt::CaseInsensitive) == 0) {
                     isNumericOrBool = true;
                 }
-                const xhyfield* f_def = table->get_field(field.name());
-                if (f_def) {
-                    switch(f_def->type()) {
-                    case xhyfield::CHAR: case xhyfield::VARCHAR: case xhyfield::TEXT:
-                    case xhyfield::ENUM: case xhyfield::DATE: case xhyfield::DATETIME:
-                    case xhyfield::TIMESTAMP:
-                        displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
-                        break;
-                    default: displayDefault = "DEFAULT " + storedDefault; break;
-                    }
-                } else {
-                    if (isNumericOrBool) displayDefault = "DEFAULT " + storedDefault;
-                    else displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
+
+                // 使用 field.type() 来决定是否加引号，而不是 f_def->type()
+                switch(field.type()) {
+                case xhyfield::CHAR: case xhyfield::VARCHAR: case xhyfield::TEXT:
+                case xhyfield::ENUM: case xhyfield::DATE: case xhyfield::DATETIME:
+                case xhyfield::TIMESTAMP:
+                    displayDefault = "DEFAULT '" + storedDefault.replace("'", "''") + "'";
+                    break;
+                default: // TINYINT, SMALLINT, INT, BIGINT, FLOAT, DOUBLE, DECIMAL, BOOL
+                    displayDefault = "DEFAULT " + storedDefault;
+                    break;
                 }
             }
             final_display_constraints_parts.append(displayDefault);
+        }
+
+        // 5. 字段级 CHECK 约束 (从 field.constraints() 解析)
+        for (const QString& fc_str : field.constraints()) {
+            // 仅添加以 "CHECK(" 开头并以 ")" 结尾的约束
+            // 并确保它不是已添加的其他约束类型 (PRIMARY KEY, NOT NULL, UNIQUE, SIZE, PRECISION, SCALE)
+            // 这个筛选逻辑在您之前的代码中已通过跳过特定开头的约束实现，这里保留。
+            // 进一步的，如果字段级CHECK也被存入table->m_checkConstraints，也需要考虑去重。
+            // 假设这里的 field.constraints() 只包含原始的、未被提升到表级的字段CHECK。
+            if (fc_str.startsWith("CHECK(", Qt::CaseInsensitive) && fc_str.endsWith(")")) {
+                 bool alreadyCoveredByTableCheck = false;
+                 // （可选）更复杂的去重：检查此字段级CHECK是否已由表级CHECK覆盖
+                 // for (const auto& table_check_expr : table->checkConstraints().values()){ ... }
+                 if(!alreadyCoveredByTableCheck){
+                    final_display_constraints_parts.append(fc_str);
+                 }
+            }
         }
 
         final_display_constraints_parts.removeDuplicates();
@@ -3648,12 +3640,14 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
                       padToVisualWidth(constraints_text, constraintWidth, true) + "\n";
     }
 
-    // 表级约束
-    // (Primary Key 已经在字段行通过标志显示，如果表级定义了，会在此重复，可考虑是否调整)
-    // if (!primary_keys_list.isEmpty()) {
-    //     output_str += "\nPRIMARY KEY (TABLE): (" + primary_keys_list.join(", ") + ")\n";
-    // }
+    // 表级约束部分
 
+    // 主键 (如果为复合主键，在此处显示其组合)
+    if (primary_keys_list.size() > 1) { // 通常单列主键已在字段行通过 "PRIMARY KEY" 标记
+         output_str += "\nPRIMARY KEY (TABLE): (" + primary_keys_list.join(", ") + ")\n";
+    }
+
+    // 外键
     const QList<ForeignKeyDefinition>& foreign_keys_list = table->foreignKeys();
     if (!foreign_keys_list.isEmpty()) {
         output_str += "\nFOREIGN KEYS:\n";
@@ -3673,50 +3667,62 @@ void MainWindow::show_schema(const QString& db_name_input, const QString& table_
         }
     }
 
-    const QMap<QString, QList<QString>>& unique_constraints_map = table->uniqueConstraints();
-    if (!unique_constraints_map.isEmpty()) {
-        bool hasPrintedUQHeader = false;
-        for (auto it = unique_constraints_map.constBegin(); it != unique_constraints_map.constEnd(); ++it) {
-            // 仅显示那些不由字段级 UNIQUE 隐含的表级 UNIQUE 约束
-            // (或者，如果字段级 UNIQUE 也被统一存储在 m_uniqueConstraints 中，则全部显示)
-            // 如果一个唯一约束只包含一个字段，而该字段已在其行显示了 "UNIQUE"，则不在此重复
-            bool alreadyShownAsFieldLevelUnique = false;
-            if (it.value().size() == 1) {
-                const xhyfield* fld = table->get_field(it.value().first());
-                if (fld && fld->constraints().contains("UNIQUE", Qt::CaseInsensitive)) {
-                    // 进一步判断，如果这个 UNIQUE 是由该字段级约束产生的（即约束名是自动生成的 UQ_TableName_FieldName）
-                    // 这是一个简化的检查，可能不够完美
-                    if (it.key().startsWith("UQ_" + table->name().toUpper() + "_" + fld->name().toUpper())) {
-                        alreadyShownAsFieldLevelUnique = true;
-                    }
-                }
-            }
+    // 表级 UNIQUE 约束 (从 table->uniqueConstraints())
+    if (!table_unique_constraints.isEmpty()) {
+           bool hasPrintedUQHeader = false;
+           for (auto it_uq_map = table_unique_constraints.constBegin();
+                it_uq_map != table_unique_constraints.constEnd(); ++it_uq_map) {
+               const QString& constraintName = it_uq_map.key();
+               const QList<QString>& uq_columns = it_uq_map.value();
 
-            if (!alreadyShownAsFieldLevelUnique) {
-                if (!hasPrintedUQHeader) {
-                    output_str += "\nUNIQUE CONSTRAINTS:\n";
-                    hasPrintedUQHeader = true;
-                }
-                output_str += QString("  CONSTRAINT %1 UNIQUE (%2)\n")
-                                  .arg(it.key())
-                                  .arg(it.value().join(", "));
-            }
-        }
-    }
+               bool displayThisTableConstraint = true;
+               if (uq_columns.size() == 1) {
+                   // 如果是单列UNIQUE
+                   const xhyfield* fld_ptr = table->get_field(uq_columns.first());
+                   if (fld_ptr && fld_ptr->constraints().contains("UNIQUE", Qt::CaseInsensitive)) { // 确保是同一个 field 对象
+                       // 如果它的名字是自动生成的 (意味着它源自字段级声明，且字段行已显示)
+                       QString autoGeneratedName = "UQ_" + table->name().toUpper() + "_" + fld_ptr->name().toUpper();
+                       if (constraintName.compare(autoGeneratedName, Qt::CaseInsensitive) == 0) {
+                           displayThisTableConstraint = false; // 字段行会显示，这里就不重复了
+                       }
+                   }
+               }
+               // 多列 UNIQUE 或者用户显式命名的单列 UNIQUE 会在这里显示
 
+               if (displayThisTableConstraint) {
+                    if (!hasPrintedUQHeader) {
+                       output_str += "\nUNIQUE CONSTRAINTS (TABLE):\n";
+                       hasPrintedUQHeader = true;
+                   }
+                   output_str += QString("  CONSTRAINT %1 UNIQUE (%2)\n")
+                                     .arg(constraintName)
+                                     .arg(uq_columns.join(", "));
+               }
+           }
+       }
+
+    // 表级 CHECK 约束 (从 table->checkConstraints())
     const QMap<QString, QString>& check_constraints_map = table->checkConstraints();
     if (!check_constraints_map.isEmpty()) {
-        output_str += "\nCHECK CONSTRAINTS:\n";
-        for (auto it = check_constraints_map.constBegin(); it != check_constraints_map.constEnd(); ++it) {
+        bool hasPrintedCheckHeader = false;
+        for (auto it_ck_map = check_constraints_map.constBegin(); it_ck_map != check_constraints_map.constEnd(); ++it_ck_map) {
+            // 这里的逻辑假设所有存储在 table->m_checkConstraints 中的都是需要在此处显示的表级约束。
+            // 如果字段级 CHECK 也被解析并存入 m_checkConstraints（带有唯一的约束名），
+            // 并且你不想重复显示，那么需要更复杂的去重逻辑，
+            // 例如，检查该 CHECK 表达式是否与某个字段的字段级 CHECK 表达式相同。
+            // 目前，我们显示所有在 m_checkConstraints 中的约束。
+            if (!hasPrintedCheckHeader) {
+                 output_str += "\nCHECK CONSTRAINTS (TABLE):\n";
+                 hasPrintedCheckHeader = true;
+            }
             output_str += QString("  CONSTRAINT %1 CHECK (%2)\n")
-            .arg(it.key())
-                .arg(it.value());
+                              .arg(it_ck_map.key())
+                              .arg(it_ck_map.value());
         }
     }
+
     textBuffer.append(output_str.trimmed());
 }
-
-
 
 
 

@@ -1,4 +1,3 @@
-
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "xhyfield.h"
@@ -348,10 +347,23 @@ bool MainWindow::matchJoinedRecordConditions(
 }
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 int MainWindow::getDatabaseRole(QString dbname){
     int role=-1;
-    QVector<UserDatabaseInfo> userDatabaseInfo;
-    userDatabaseInfo=Account.getUserDatabaseInfo(username);
     for(auto it :userDatabaseInfo){
         if(dbname==it.dbName) role=it.permissions;
     }
@@ -1161,11 +1173,9 @@ void MainWindow::handleInsert(const QString& command) {
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
         textBuffer.append("Insert Data Runtime Error: " + QString::fromStdString(e.what()) + (transactionStartedHere ? " (Transaction rolled back)" : ""));
-        throw;
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
        textBuffer.append(QString("Unknown critical error during Insert Data.") + (transactionStartedHere ? " (Transaction rolled back)" : ""));
-       throw;
     }
 }
 
@@ -1332,52 +1342,27 @@ ConditionNode MainWindow::parseSubExpression(QStringView expressionView) {
         return node;
     }
 
-    // zyh在这里加了这样一段，然后就可以处理BETWEEN ... AND ...语句了
-    // 注意：这段代码可能与下面的通用 BETWEEN/NOT BETWEEN 比较操作符重复。
-    // 如果下面的通用操作符能正确处理，这段可以考虑移除或整合。
-    // 为保持您原始结构，暂时保留。
-    if (expression.contains("BETWEEN", Qt::CaseInsensitive) && !expression.toUpper().contains("NOT BETWEEN")) { // 更精确地避免匹配 NOT BETWEEN
-        QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
-        QRegularExpressionMatch match = betweenRegex.match(expression);
+    // 特别添加：直接检查是否包含BETWEEN ... AND ...
+        if (expression.contains("BETWEEN", Qt::CaseInsensitive)) {
+            // 解析 BETWEEN ... AND ...
+            QRegularExpression betweenRegex(R"((.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+))", QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch match = betweenRegex.match(expression);
 
-        if (match.hasMatch()) {
-            // 需要确保此处的BETWEEN不会与下面比较操作符循环中的BETWEEN冲突或被错误地优先处理。
-            // 一个更稳健的方法是让所有比较操作符（包括BETWEEN）都在一个统一的优先级/解析流程中。
-            // 但如果此处的特殊处理是针对某种特定情况，请确保其逻辑正确。
-            // 检查此处的 BETWEEN 是否比 AND/OR 优先级高。如果是，则此位置可能正确。
-
-            // 检查是否是顶层 BETWEEN (不是被 AND/OR 分割的子句)
-            bool isTopLevelBetween = true;
-            int parenLevel = 0;
-            QString exprBeforeBetween = match.captured(1);
-            for(QChar c : exprBeforeBetween) { // 检查BETWEEN左边是否有未闭合的括号或更高优先级的AND/OR
-                if(c == '(') parenLevel++;
-                else if(c == ')') parenLevel--;
-            }
-            // 这个检查很简单，可能不够全面。findLowestPrecedenceOperator 更好。
-            // 如果 findLowestPrecedenceOperator 找到了AND/OR，则不应该在这里处理 BETWEEN。
-            QPair<int, QString> opDetailsForBetweenCheck = findLowestPrecedenceOperator(expression, {"OR", "AND"});
-            if (opDetailsForBetweenCheck.first != -1) { // 如果存在更高优先级的AND/OR
-                isTopLevelBetween = false;
-            }
-
-
-            if (isTopLevelBetween) {
+            if (match.hasMatch()) {
                 QString field = match.captured(1).trimmed();
                 QString value1 = match.captured(2).trimmed();
                 QString value2 = match.captured(3).trimmed();
 
                 node.type = ConditionNode::COMPARISON_OP;
-                node.comparison.fieldName = field; // field 可能也需要支持 alias.column
+                node.comparison.fieldName = field;
                 node.comparison.operation = "BETWEEN";
                 node.comparison.value = parseLiteralValue(value1);
                 node.comparison.value2 = parseLiteralValue(value2);
 
-                qDebug() << "Parsed BETWEEN (special handling): Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
+                qDebug() << "Parsed BETWEEN: Field=" << field << ", Value1=" << value1 << ", Value2=" << value2;
                 return node;
             }
         }
-    }
 
 
     // 3. 处理逻辑运算符 OR, AND ... (这部分代码与您之前提供的版本相同，保持不变)
@@ -2321,7 +2306,7 @@ void MainWindow::handleSelect(const QString& command) {
                 if(!having_part_s.isEmpty() && !final_results_s.isEmpty()){
                     // ... (您的 HAVING 逻辑，需要适配，可能需要一个新的 matchConditions for grouped rows)
                     // ... (这部分逻辑与 JOIN 的 HAVING 类似，但作用于单表分组数据)
-                    textBuffer.append("提示: 单表查询的 HAVING 功能需要您根据原有逻辑填充。");
+                    //textBuffer.append("提示: 单表查询的 HAVING 功能需要您根据原有逻辑填充。");
                 }
             }
         }
@@ -3912,8 +3897,6 @@ void MainWindow::buildTree(){
     for (const Database &db : GUI_dbms) {
         // 创建数据库节点（作为根的子节点）
         //只创建用户拥有的数据库节点
-        QVector<UserDatabaseInfo> userDatabaseInfo;
-        userDatabaseInfo=Account.getUserDatabaseInfo(username);
         bool exist=false;
         for(auto databaseinfo:userDatabaseInfo){
             if(db.database==databaseinfo.dbName) exist=true;
@@ -4259,4 +4242,3 @@ QString MainWindow::removeTableAlias(const QString& col, const QString& table_al
     }
     return result;
 }
-

@@ -845,16 +845,16 @@ void xhydbmanager::load_databases_from_files() {
                 qDebug() << "    [LOAD_DB_TDF] 文件在CHECK约束信息后已结束（可能无表级UNIQUE约束）。";
             }
             qDebug() << "    [LOAD_DB_TDF] 表级 UNIQUE 约束定义加载完毕。当前文件位置: " << tdfFile.pos();
-
-
-            // --- TDF 文件加载结束 ---
-            tdfFile.close();
-
             if (!tdf_load_overall_successful) {
                 qWarning() << "  [LOAD_DB_ERROR] 表 '" << current_table_name << "' 的TDF文件加载过程中发生错误，跳过TRD加载。";
                 // No need to remove from m_databases.last().tables() yet, as it's not added until the end.
                 continue; // Process next TDF file
             }
+
+            // --- TDF 文件加载结束 ---
+            tdfFile.close();
+
+
             if (table.fields().isEmpty() && !current_table_name.contains("_temp_")) { // Allow internal temp tables to be field-less
                 qWarning() << "  [LOAD_DB_WARNING] 表 '" << current_table_name << "' 在TDF加载后没有定义任何字段。";
                 // This table might be invalid, decide if it should be skipped.

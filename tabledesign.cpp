@@ -128,7 +128,8 @@ void tableDesign::on_comfirm_released()
         ++i;
     }
     // for(int row = 0; row<ui->tableWidget_2->rowCount(); ++row){
-    //     if()
+    //     QTableWidget* tablewidget = ui->tableWidget_2;
+    //     if(tablewidget->item(row,0)&&tablewidget->item(row,1))
     // }
     sql += "));";
 

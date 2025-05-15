@@ -1,3 +1,4 @@
+
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "xhyfield.h"
@@ -25,7 +26,7 @@
 #include <QAction>        // <-- 添加这一行
 
 
-//DBMS 1.0
+
 MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -347,23 +348,10 @@ bool MainWindow::matchJoinedRecordConditions(
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 int MainWindow::getDatabaseRole(QString dbname){
     int role=-1;
+    QVector<UserDatabaseInfo> userDatabaseInfo;
+    userDatabaseInfo=Account.getUserDatabaseInfo(username);
     for(auto it :userDatabaseInfo){
         if(dbname==it.dbName) role=it.permissions;
     }
@@ -1173,11 +1161,11 @@ void MainWindow::handleInsert(const QString& command) {
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
         textBuffer.append("Insert Data Runtime Error: " + QString::fromStdString(e.what()) + (transactionStartedHere ? " (Transaction rolled back)" : ""));
-    throw;
+        throw;
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
        textBuffer.append(QString("Unknown critical error during Insert Data.") + (transactionStartedHere ? " (Transaction rolled back)" : ""));
-   throw;
+       throw;
     }
 }
 
@@ -3924,6 +3912,8 @@ void MainWindow::buildTree(){
     for (const Database &db : GUI_dbms) {
         // 创建数据库节点（作为根的子节点）
         //只创建用户拥有的数据库节点
+        QVector<UserDatabaseInfo> userDatabaseInfo;
+        userDatabaseInfo=Account.getUserDatabaseInfo(username);
         bool exist=false;
         for(auto databaseinfo:userDatabaseInfo){
             if(db.database==databaseinfo.dbName) exist=true;
@@ -4269,3 +4259,4 @@ QString MainWindow::removeTableAlias(const QString& col, const QString& table_al
     }
     return result;
 }
+

@@ -25,7 +25,7 @@
 #include <QAction>        // <-- 添加这一行
 
 
-
+//DBMS 1.0
 MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -1173,9 +1173,11 @@ void MainWindow::handleInsert(const QString& command) {
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
         textBuffer.append("Insert Data Runtime Error: " + QString::fromStdString(e.what()) + (transactionStartedHere ? " (Transaction rolled back)" : ""));
+    throw;
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
        textBuffer.append(QString("Unknown critical error during Insert Data.") + (transactionStartedHere ? " (Transaction rolled back)" : ""));
+   throw;
     }
 }
 

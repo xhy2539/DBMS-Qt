@@ -205,6 +205,8 @@ void xhydbmanager::rollbackTransaction() {
         // m_tempTables 是为管理器层面的 DDL 事务准备的，例如 CREATE TABLE 后 ROLLBACK
         // 如果您的事务模型支持这种混合操作，清空它是合理的。
         m_tempTables.clear();
+
+
         m_inTransaction = false;
         qDebug() << "Transaction rolled back for database:" << current_database;
     }

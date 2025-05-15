@@ -187,8 +187,10 @@ void MainWindow::execute_command(const QString& command)
             handleUseDatabase(command);
         }
         else if (cmdUpper.startsWith("CREATE TABLE")) {
+            if(getDatabaseRole(current_db)>0){
             QString mutableCommand = command;
-            handleCreateTable(mutableCommand);
+                handleCreateTable(mutableCommand);}
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("INSERT INTO")) {
             if(getDatabaseRole(current_db)>0)

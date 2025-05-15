@@ -929,8 +929,7 @@ bool xhytable::insertData(const QMap<QString, QString>& fieldValuesFromUser) {
         return true;
     } catch (const std::runtime_error& e) {
         qWarning() << "[表::插入数据] 向表 '" << m_name << "' 插入数据失败: " << e.what();
-        // 此处不需要回滚事务，异常会向上传播，调用者 (例如 MainWindow) 应处理事务回滚。
-        return false;
+        throw;
     }
 }
 
@@ -1139,7 +1138,7 @@ int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions,
                                 const xhyfield* childFkFieldDef = referencingTable.get_field(childFkColumn);
                                 if (childFkFieldDef && referencingTable.notNullFields().contains(childFkFieldDef->name())) {
                                     qWarning() << "    ON UPDATE SET NULL 失败: 子表 '" << referencingTable.name() << "' 的外键列 '" << childFkColumn << "' 不允许为NULL。约束 '" << fkDef.constraintName << "'";
-                                    //【严格模式下应抛出异常】 throw std::runtime_error(...)
+                                    throw;
                                     canSetNull = false;
                                     break;
                                 }
@@ -1150,26 +1149,7 @@ int xhytable::updateData(const QMap<QString, QString>& updates_with_expressions,
                                 qDebug() << "    ON UPDATE SET NULL 导致表 '" << referencingTable.name() << "' 中更新了 " << set_null_rows << " 行。";
                             }
                         } else { // NO_ACTION, RESTRICT, SET_DEFAULT (简化)
-                            // 对于 NO_ACTION/RESTRICT，如果父键值改变了，而子表有记录引用旧值，
-                            // 理论上这个父表更新操作本身就应该被阻止（这是在父表的 validateRecord 中检查的，如果它检查了引用它的子表）。
-                            // 但这里的逻辑是在父表更新已“暂存”后，检查子表。
-                            // 如果是 RESTRICT，需要检查是否有子记录仍然引用旧的父键。
-                            // 如果父表已经改了（在 m_tempRecords 中），那么这个检查的意义是：如果子表没有级联动作，
-                            // 而父键改了，是否会导致悬空引用。
-                            // 标准 SQL 的 RESTRICT 通常在语句开始时或即将修改数据时检查。
-                            // NO ACTION 通常在语句结束或事务提交时检查。
-                            // 您的实现中，父表的 validateRecord 如果不检查其对子表的影响，
-                            // 那么RESTRICT/NO_ACTION在这里可能需要抛错，如果子记录引用了即将改变的父键。
-                            // 简化：假设父表的 validateRecord 已经确保了自身更新的合法性。
-                            // 如果执行到这里且是 NO_ACTION/RESTRICT，表示父表更新已发生，
-                            // 我们需要检查是否有子记录的 FK 指向了一个不再存在的父键。
-                            // 但由于父表已经更新了 (in m_tempRecords)，这里我们其实是在验证 *新* 父键是否存在，
-                            // 而不是检查子表是否引用了 *旧* 父键。
-                            // 如果外键列没有 ON UPDATE CASCADE 或 SET NULL，并且父键改变了，
-                            // 那么子表的外键现在可能指向一个无效的父键。
-                            // 这应该在子表的 validateRecord 中捕获（如果它在父表更新后被调用来重新验证子表记录）。
-                            // 或者，更严格的 RESTRICT 应该在父表尝试更新其主键时，就检查是否有子表记录引用它。
-                            // 此处代码已在父表更新后，若子表无级联动作，则意味着外键可能已失效，依赖后续的完整性检查。
+
                             qDebug() << "  [ON UPDATE " << (fkDef.onUpdateAction == ForeignKeyDefinition::NO_ACTION ? "NO ACTION" : "RESTRICT/SET_DEFAULT")
                                      << "] 在表 '" << referencingTable.name() << "' 上对于约束 '" << fkDef.constraintName << "' 无显式级联动作或限制性检查。";
                             // 为确保 RESTRICT 语义，可以主动检查：
@@ -1370,6 +1350,9 @@ bool xhytable::selectData(const ConditionNode & conditions, QVector<xhyrecord>& 
         }
     } catch (const std::runtime_error& e) {
         qWarning() << "查询表 '" << m_name << "' 数据时出错: " << e.what();
+
+
+
         return false;
     }
     return true;

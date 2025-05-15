@@ -347,23 +347,10 @@ bool MainWindow::matchJoinedRecordConditions(
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 int MainWindow::getDatabaseRole(QString dbname){
     int role=-1;
+    QVector<UserDatabaseInfo> userDatabaseInfo;
+    userDatabaseInfo=Account.getUserDatabaseInfo(username);
     for(auto it :userDatabaseInfo){
         if(dbname==it.dbName) role=it.permissions;
     }

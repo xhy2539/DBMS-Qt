@@ -520,6 +520,7 @@ void MainWindow::execute_command(const QString& command)
             if (db_manager.commitTransaction()) {
                 textBuffer.append("事务提交成功。");
             } else {
+
                 textBuffer.append("错误: 事务提交失败 (可能不在事务中或没有更改)。");
             }
         }
@@ -1209,9 +1210,11 @@ void MainWindow::handleInsert(const QString& command) {
     } catch (const std::runtime_error& e) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
         textBuffer.append("Insert Data Runtime Error: " + QString::fromStdString(e.what()) + (transactionStartedHere ? " (Transaction rolled back)" : ""));
+        throw;
     } catch (...) {
         if (transactionStartedHere) db_manager.rollbackTransaction();
        textBuffer.append(QString("Unknown critical error during Insert Data.") + (transactionStartedHere ? " (Transaction rolled back)" : ""));
+       throw;
     }
 }
 

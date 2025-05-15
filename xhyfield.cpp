@@ -30,9 +30,7 @@ void xhyfield::set_enum_values(const QList<QString>& values) {
     // 您可以在这里添加一些调试信息，例如：
     // qDebug() << "Enum values for field" << m_name << "set to:" << m_enumValues;
 }
-// xhyfield.cpp
 
-// xhyfield.cpp
 
 QString xhyfield::typestring() const {
     QString baseTypeStr;
@@ -72,8 +70,7 @@ QString xhyfield::typestring() const {
             // 如果 CHAR 类型没有 SIZE 约束，SQL 标准通常默认为 CHAR(1)
             typeAndParams += "(1)";
         }
-        // VARCHAR 如果没有指定长度，typeAndParams 保持为 "VARCHAR"
-        // (具体行为可能依赖于数据库实现或后续的默认值处理)
+
 
     } else if (m_type == DECIMAL) {
         QString p_str, s_str;

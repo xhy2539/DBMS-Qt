@@ -118,8 +118,8 @@ MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
         bool ok;
         QString inputText = QInputDialog::getText(
             this,
-            tr("表名称:"),
-            tr("请输入内容:"),
+            tr("创建表"),
+            tr("请输入表名:"),
             QLineEdit::Normal,
             "",
             &ok
@@ -137,7 +137,7 @@ MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
                 QString ass = textBuffer.join("");
                 qDebug()<<ass;
                 if(!ass.isEmpty()){
-
+                    // qDebug()<<ass;
                     if(!ass.contains("创建成功")) {
                         QMessageBox msg;
                         msg.setWindowTitle("错误");
@@ -4066,6 +4066,7 @@ void MainWindow::handleItemDoubleClicked(QTreeWidgetItem *item, int column){
 }
 
 void MainWindow::openTable(QString tableName){
+    if(current_GUI_Db.isEmpty()) return;
     for(int i=0; i < ui->tabWidget->count(); ++i){
         if(tableName+" @"+current_GUI_Db == ui->tabWidget->tabText(i)){
             return;
@@ -4091,7 +4092,7 @@ void MainWindow::openTable(QString tableName){
         qDebug()<<ass;
         if(!ass.isEmpty()){
 
-            if(ass.contains("0行") || ass.contains("errors") || ass.contains("错误")) {
+            if(ass.contains("0行") || ass.contains("errors") || ass.contains("错误") ||ass.contains("rolled back")) {
                 QMessageBox msg;
                 msg.setWindowTitle("错误");
                 msg.setText(ass);

@@ -49,13 +49,14 @@ void tableList::on_listWidget_itemClicked(QListWidgetItem *item)
 
 void tableList::on_createTable_released()
 {
-
+    emit tableCreate();
 }
 
 
 void tableList::on_dropTable_released()
 {
-    QString sql = "DROP TABLE " + current_itemName + ";";
-    emit tableDrop(current_db,sql);
+    if(!current_itemName.isEmpty()){
+        QString sql = "DROP TABLE " + current_itemName + ";";
+        emit tableDrop(current_db,sql);
+    }
 }
-

@@ -23,7 +23,8 @@
 #include <QMenu>          // <-- 添加这一行
 #include <QMenuBar>       // <-- 添加这一行
 #include <QAction>        // <-- 添加这一行
-
+#include <QInputDialog>
+#include "tabledesign.h"
 
 
 MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
@@ -102,12 +103,60 @@ MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
     connect(ui->treeWidget, &QTreeWidget::itemDoubleClicked, this, &MainWindow::handleItemDoubleClicked);
     connect(tablelist,&tableList::tableOpen,this ,&MainWindow::openTable);
     connect(tablelist,&tableList::tableDrop,[=](QString dbName, QString sql){
-        db_manager.use_database(dbName);
-        handleString(sql);
-        textBuffer.clear();
-        dataSearch();
-        buildTree();
-        updateList(current_GUI_Db);
+        if(!current_GUI_Db.isEmpty()){
+            db_manager.use_database(dbName);
+            handleString(sql);
+            textBuffer.clear();
+            dataSearch();
+            buildTree();
+            updateList(current_GUI_Db);
+        }
+    });
+    connect(tablelist,&tableList::tableCreate,[=]{
+        if(current_GUI_Db.isEmpty()) return;
+        QString dbName = current_GUI_Db;
+        bool ok;
+        QString inputText = QInputDialog::getText(
+            this,
+            tr("表名称:"),
+            tr("请输入内容:"),
+            QLineEdit::Normal,
+            "",
+            &ok
+        );
+        if (ok && !inputText.isEmpty()) {
+            // 用户点击确定，且输入不为空
+            // qDebug() << "输入内容：" << inputText;
+            tableDesign* tabledesign = new tableDesign(inputText);
+            ui->tabWidget->addTab(tabledesign,inputText+" @"+dbName);
+            ui->tabWidget->setCurrentWidget(tabledesign);
+            connect(tabledesign,&tableDesign::tableCreate,[=](QString sql){
+                db_manager.use_database(dbName);
+                handleString(sql+"\n");
+
+                QString ass = textBuffer.join("");
+                qDebug()<<ass;
+                if(!ass.isEmpty()){
+
+                    if(!ass.contains("创建成功")) {
+                        QMessageBox msg;
+                        msg.setWindowTitle("错误");
+                        msg.setText(ass);
+                        msg.setStandardButtons(QMessageBox::Ok);
+                        msg.exec();
+                    }else{
+                        ui->tabWidget->removeTab(ui->tabWidget->currentIndex());
+                        ui->tabWidget->setCurrentIndex(0);
+                        tabledesign->deleteLater();
+                    }
+                }
+
+                textBuffer.clear();
+                dataSearch();
+                buildTree();
+                updateList(dbName);
+            });
+        }
     });
 }
 
@@ -4067,7 +4116,7 @@ void MainWindow::openTable(QString tableName){
         qDebug()<<ass;
         if(!ass.isEmpty()){
 
-            if(ass.contains("0行") || ass.contains("errors")) {
+            if(ass.contains("0行") || ass.contains("errors") || ass.contains("错误")) {
                 QMessageBox msg;
                 msg.setWindowTitle("错误");
                 msg.setText(ass);
@@ -4077,6 +4126,7 @@ void MainWindow::openTable(QString tableName){
                 tableshow->resetButton(true);
         }
         textBuffer.clear();
+        if(sql.startsWith("DELETE")) tableshow->resetShow();
         });
 
     }

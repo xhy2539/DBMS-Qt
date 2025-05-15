@@ -72,6 +72,10 @@ bool UserFileManager::loadUsers()
     file.close();
     return true;
 }
+UserFileManager::~UserFileManager(){
+    m_users.clear();
+    m_userDatabases.clear();
+}
 
 bool UserFileManager::saveUsers()
 {

@@ -36,7 +36,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(const QString &name, QWidget *parent = nullptr);
+    explicit MainWindow(const QString &name,QString path,QWidget *parent=nullptr);
     ~MainWindow();
 
     bool parseWhereClause(const QString &whereStr, ConditionNode &rootNode);

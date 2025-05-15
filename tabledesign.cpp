@@ -115,7 +115,7 @@ void tableDesign::on_comfirm_released()
             sql += ui->tableWidget->item(i,7)->text();
         }
         if(ui->tableWidget->item(i,8)){
-            sql += (" CHECK( "+ui->tableWidget->item(i,8)->text()+" )");
+            sql += (" CHECK ( "+ui->tableWidget->item(i,8)->text()+" )");
         }
     }
     sql += " , primary key(";

@@ -29,7 +29,7 @@ private:
     Ui::tableDesign *ui;
     QString dbName;
     QString tableName;
-    QStringList typelist={"INT","VARCHAR","DECIMAL","DATE","BOOL"};
+    QStringList typelist={"INT","BIGINT","VARCHAR","CHAR","DECIMAL","DOUBLE","DATE","TIMESTAMP","BOOL"};
     // TINYINT, SMALLINT, INT, BIGINT,
     //     FLOAT, DOUBLE, DECIMAL,
     //     CHAR, VARCHAR, TEXT,

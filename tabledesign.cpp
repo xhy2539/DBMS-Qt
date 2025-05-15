@@ -79,27 +79,20 @@ void tableDesign::on_addField_released()
 
 void tableDesign::on_comfirm_released()
 {
-    QComboBox * combo = qobject_cast<QComboBox*>(ui->tableWidget->cellWidget(0, 1));
-    if(combo){
-        qDebug()<<combo->currentText();
-    }else
-        qDebug()<<"error";
     QString sql = "CREATE TABLE "+tableName + " ( ";
     QStringList primary;
     for(int i= 0; i<ui->tableWidget->rowCount(); ++i){
         if(i != 0){
             sql += " , ";
         }
-        if(!ui->tableWidget->item(i,0)){
-            return ;
-        }
-        else sql += ui->tableWidget->item(i,0)->text();
+        if(ui->tableWidget->item(i,0))
+            sql += ui->tableWidget->item(i,0)->text();
 
         QComboBox * combo = qobject_cast<QComboBox*>(ui->tableWidget->cellWidget(i, 1));
         QString type = combo->currentText();
         sql += (" "+type);
 
-        if(type == "VARCHAR" && ui->tableWidget->item(i,2))
+        if((type == "VARCHAR" || type == "CHAR")&& ui->tableWidget->item(i,2))
             sql += "("+ui->tableWidget->item(i,2)->text()+") ";
         if(type == "DECIMAL" && ui->tableWidget->item(i,2) && ui->tableWidget->item(i,3))
             sql += "("+ui->tableWidget->item(i,2)->text()+","+ui->tableWidget->item(i,3)->text()+") ";
@@ -139,7 +132,7 @@ void tableDesign::on_comfirm_released()
     }
     sql += ");";
 
-    // qDebug()<<sql;
+    qDebug()<<sql;
     emit tableCreate(sql);
 }
 

@@ -108,9 +108,10 @@ void tableDesign::on_comfirm_released()
             sql += " NOT NULL ";
         if(getCheckBoxFromCell(i,5))
             primary.append(ui->tableWidget->item(i,0)->text());
-
-        if(ui->tableWidget->item(i,6)){
-            sql += "DEFUALT ";
+        if(getCheckBoxFromCell(i,6))
+            sql += " UNIQUE ";
+        if(ui->tableWidget->item(i,7)){
+            sql += " DEFUALT ";
             sql += ui->tableWidget->item(i,7)->text();
         }
         // if(ui->tableWidget->item(i,7)){
@@ -127,14 +128,19 @@ void tableDesign::on_comfirm_released()
             sql += (","+prim);
         ++i;
     }
-    // for(int row = 0; row<ui->tableWidget_2->rowCount(); ++row){
-    //     QTableWidget* tablewidget = ui->tableWidget_2;
-    //     if(tablewidget->item(row,0)&&tablewidget->item(row,1))
-    // }
-    sql += "));";
+    sql += ")";
+    for(int row = 0; row<ui->tableWidget_2->rowCount(); ++row){
+        QTableWidget* tablewidget = ui->tableWidget_2;
+        if(tablewidget->item(row,0)&&tablewidget->item(row,1)&&tablewidget->item(row,2)){
+            sql += " ,FOREIGN KEY(";
+            sql += tablewidget->item(row,0)->text();
+            sql += (") REFERENCES "+ tablewidget->item(row,1)->text()+"("+tablewidget->item(row,2)->text()+")");
+        }
+    }
+    sql += ");";
 
-    qDebug()<<sql;
-    // emit tableCreate(sql);
+    // qDebug()<<sql;
+    emit tableCreate(sql);
 }
 
 void tableDesign::addRow(int row){
@@ -145,5 +151,6 @@ void tableDesign::addRow(int row){
 
     setupCheckBoxInTableCell(row,4);
     setupCheckBoxInTableCell(row,5);
+    setupCheckBoxInTableCell(row,6);
 
 }

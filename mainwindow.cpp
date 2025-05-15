@@ -26,22 +26,18 @@
 
 
 
-MainWindow::MainWindow(const QString &name,QWidget *parent)
+MainWindow::MainWindow(const QString &name,QString path,QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , Account(findDataFile())
+    , Account(path)
     , username(name)
 {
     ui->setupUi(this);
     setWindowTitle("Mini DBMS");
-    if (!Account.loadUsers()) {
-        qWarning() << "警告：用户数据加载/初始化失败。";
-    }
     userDatabaseInfo=Account.getUserDatabaseInfo(username);
     db_manager.load_databases_from_files();
 
     //菜单栏（注册账号）
-
     // 获取或创建主窗口的菜单栏
     QMenuBar *menuBar = this->menuBar(); // QMainWindow::menuBar() 会返回菜单栏指针，如果没有则会自动创建
 

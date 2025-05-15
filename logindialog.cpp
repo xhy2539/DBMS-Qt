@@ -1,5 +1,6 @@
 #include "logindialog.h"
 #include "ui_logindialog.h"
+#include "userfilemanager.h"
 #include <QFile>
 #include <QDataStream>
 #include <QCryptographicHash>
@@ -7,7 +8,7 @@
 #include <QDir>
 
 // 二进制文件格式的结构体
-#pragma pack(push, 1)
+/*#pragma pack(push, 1)
 struct UserRecord {
     char username[50];      // 用户名 (固定50字节)
     char salt[32];          // 盐值 (固定32字节)
@@ -15,11 +16,12 @@ struct UserRecord {
     uint8_t role;           // 用户角色
     uint16_t db_count;      // 关联数据库数
 };
-#pragma pack(pop)
+#pragma pack(pop)*/
 
-LoginDialog::LoginDialog(QWidget *parent) :
+LoginDialog::LoginDialog(UserFileManager *userManager, QWidget *parent) :
     QDialog(parent),
-    ui(new Ui::LoginDialog)
+    ui(new Ui::LoginDialog),
+    m_userManager(userManager)
 {
     ui->setupUi(this);
     ui->passwordLineEdit->setEchoMode(QLineEdit::Password);
@@ -132,11 +134,14 @@ void LoginDialog::on_loginButton_clicked()
         return;
     }
 
-    if (validateUser(username, password)) {
-        accept(); // 登录成功
+    // 调用传入的 UserFileManager 实例的 validateUser 方法进行验证
+    if (m_userManager && m_userManager->validateUser(username, password)) {
+        QMessageBox::information(this, "登录成功", "欢迎, " + username + "!"); // 可选的成功提示
+        accept(); // 登录成功，关闭对话框并返回 Accepted
     } else {
         QMessageBox::warning(this, "登录失败", "用户名或密码错误");
         ui->passwordLineEdit->clear();
+        ui->passwordLineEdit->setFocus(); // 让密码输入框获得焦点，方便用户重新输入
     }
 }
 void LoginDialog::on_cancelButton_clicked()

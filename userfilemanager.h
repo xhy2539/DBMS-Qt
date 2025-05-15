@@ -38,7 +38,7 @@ class UserFileManager
 {
 public:
     explicit UserFileManager(const QString& filename = "");
-
+    ~UserFileManager();
     bool loadUsers();
     bool saveUsers();
 

@@ -62,10 +62,38 @@ int CreateUserDialog::getRole() const {
     return ui->roleComboBox->currentData().toInt();
 }
 
-QVector<QPair<QString, int>> CreateUserDialog::getDatabasePermissions() const {
-    QVector<QPair<QString, int>> permissions;
-    // TODO: 实现获取数据库权限
-    return permissions;
+QVector<QPair<QString, int>> CreateUserDialog::getDatabasePermissions() const
+{
+    QVector<QPair<QString, int>> permissions; // 用于存储最终的数据库权限列表
+
+    // 遍历 QTreeWidget 中的所有顶级项 (也就是每个数据库项)
+    for (int i = 0; i < ui->databaseTreeWidget->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = ui->databaseTreeWidget->topLevelItem(i); // 获取当前的顶级项 (数据库项)
+
+        // 检查第一列 (索引 0) 的复选框是否被勾选
+        if (item->checkState(0) == Qt::Checked) {
+            // 如果被勾选，说明用户想为这个数据库设置权限
+
+            QString dbName = item->text(0); // 获取第一列的文本，即数据库名称
+
+            // 获取第二列 (索引 1) 中的控件，它应该是我们之前添加的 QComboBox
+            QWidget *widget = ui->databaseTreeWidget->itemWidget(item, 1);
+            QComboBox *permCombo = qobject_cast<QComboBox*>(widget); // 尝试将其转换为 QComboBox 指针
+
+            // 检查转换是否成功，以及 QComboBox 是否有效
+            if (permCombo) {
+                // 如果成功获取了 QComboBox，获取当前选中的项关联的数据
+                // 我们在添加 QComboBox 选项时，将权限级别 (0, 1, 2) 存储在了数据中
+                int permLevel = permCombo->currentData().toInt();
+                // 将数据库名称和选中的权限级别添加到结果列表中
+                permissions.append(qMakePair(dbName, permLevel));
+            } else {
+                qWarning() << "错误: 无法获取数据库 '" << dbName << "' 的权限组合框。";
+            }
+        }
+    }
+
+    return permissions; // 返回收集到的数据库权限列表
 }
 
 void CreateUserDialog::on_buttonBox_accepted()
@@ -92,7 +120,6 @@ void CreateUserDialog::on_buttonBox_accepted()
     for (const QPair<QString, int>& perm : uiPermissions) {
         QString dbName = perm.first;
         int uiPermLevel = perm.second; // UI 中的权限值 (0, 1, 2)
-
         // 直接将 int 转换为 uint8_t，因为它们现在是直接对应的
         uint8_t userFileManagerPermLevel = static_cast<uint8_t>(uiPermLevel);
 

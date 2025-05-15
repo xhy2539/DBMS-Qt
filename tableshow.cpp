@@ -99,6 +99,7 @@ void tableShow::on_addRecord_released()
 
 void tableShow::on_deleteRecord_released()
 {
+    if(ui->tableWidget->currentRow() == -1) return;
     int row = ui->tableWidget->currentRow();
     QString deleteString = "DELETE FROM "+m_table->name() +" WHERE ";
 

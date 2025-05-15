@@ -23,7 +23,7 @@ signals:
 
 private:
     Ui::queryWidget *ui;
-
+    QString dbName;
 };
 
 #endif // QUERYWIDGET_H

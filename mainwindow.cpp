@@ -37,6 +37,7 @@ MainWindow::MainWindow(const QString &name,QWidget *parent)
     if (!Account.loadUsers()) {
         qWarning() << "警告：用户数据加载/初始化失败。";
     }
+    userDatabaseInfo=Account.getUserDatabaseInfo(username);
     db_manager.load_databases_from_files();
 
     //菜单栏（注册账号）
@@ -111,6 +112,14 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+int MainWindow::getDatabaseRole(QString dbname){
+    int role=-1;
+    for(auto it :userDatabaseInfo){
+        if(dbname==it.dbName) role=it.permissions;
+    }
+    return role;
+}
+
 QString MainWindow::findDataFile() {
     QStringList possiblePaths = {
         "data/default_userdata.dat",
@@ -147,11 +156,17 @@ void MainWindow::execute_command(const QString& command)
         if (cmdUpper.startsWith("EXPLAIN SELECT")) {
             handleExplainSelect(command);
         } else if (cmdUpper.startsWith("CREATE UNIQUE INDEX")) {
+            if(getDatabaseRole(current_db)>0)
             handleCreateIndex(command);
-        } else if (cmdUpper.startsWith("CREATE INDEX")) {
+            else textBuffer.append(QString("权限不足"));
+        }else if (cmdUpper.startsWith("CREATE INDEX")) {
+            if(getDatabaseRole(current_db)>0)
             handleCreateIndex(command);
+            else textBuffer.append(QString("权限不足"));
         } else if (cmdUpper.startsWith("DROP INDEX")) {
+            if(getDatabaseRole(current_db)>0)
             handleDropIndex(command);
+            else textBuffer.append(QString("权限不足"));
         } else if (cmdUpper.startsWith("SHOW INDEXES")) {
             handleShowIndexes(command);
         }else if (cmdUpper.startsWith("CREATE DATABASE")) {
@@ -168,7 +183,9 @@ void MainWindow::execute_command(const QString& command)
             handleCreateTable(mutableCommand);
         }
         else if (cmdUpper.startsWith("INSERT INTO")) {
+            if(getDatabaseRole(current_db)>0)
             handleInsert(command);
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("SHOW TABLES")) {
             show_tables(db_manager.get_current_database());
@@ -177,22 +194,32 @@ void MainWindow::execute_command(const QString& command)
             handleDescribe(command);
         }
         else if (cmdUpper.startsWith("DROP DATABASE")) {
+            if(Account.getUserRole(username)==2)
             handleDropDatabase(command);
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("DROP TABLE")) {
+            if(getDatabaseRole(current_db)>0)
             handleDropTable(command);
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("UPDATE")) {
+            if(getDatabaseRole(current_db)>0)
             handleUpdate(command);
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("DELETE FROM")) {
+            if(getDatabaseRole(current_db)>0)
             handleDelete(command);
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("SELECT")) {
             handleSelect(command);
         }
         else if (cmdUpper.startsWith("ALTER TABLE")) {
+            if(getDatabaseRole(current_db)>0)
             handleAlterTable(command);
+            else textBuffer.append(QString("权限不足"));
         }
         else if (cmdUpper.startsWith("BEGIN TRANSACTION") || cmdUpper.startsWith("BEGIN")) {
             if (db_manager.beginTransaction()) {
@@ -237,6 +264,13 @@ void MainWindow::handleCreateDatabase(const QString& command) {
     QRegularExpressionMatch match = re.match(command);
     if (match.hasMatch()) {
         QString db_name = match.captured(1);
+        //判断权限
+        if(Account.getUserRole(username)<1) {
+            textBuffer.clear();
+            textBuffer.append(QString("权限不足"));
+            return;
+        }
+
         if (db_manager.createdatabase(db_name)) {
             textBuffer.append(QString("数据库 '%1' 创建成功。").arg(db_name));
         } else {
@@ -252,6 +286,12 @@ void MainWindow::handleUseDatabase(const QString& command) {
     QRegularExpressionMatch match = re.match(command);
     if (match.hasMatch()) {
         QString db_name = match.captured(1);
+        int role=-1;
+        role=getDatabaseRole(db_name);
+        if(role<0){
+            textBuffer.append(QString("权限不足"));
+            return;
+        }
         if (db_manager.use_database(db_name)) {
             current_db = db_name;
             textBuffer.append(QString("已切换到数据库 '%1'。").arg(db_name));
@@ -3413,6 +3453,12 @@ void MainWindow::buildTree(){
 
     for (const Database &db : GUI_dbms) {
         // 创建数据库节点（作为根的子节点）
+        //只创建用户拥有的数据库节点
+        bool exist=false;
+        for(auto databaseinfo:userDatabaseInfo){
+            if(db.database==databaseinfo.dbName) exist=true;
+        }
+        if(!exist&&Account.getUserRole(username)<2) continue;
         QTreeWidgetItem *dbItem = new QTreeWidgetItem(ui->treeWidget);
         dbItem->setText(0, db.database);
 

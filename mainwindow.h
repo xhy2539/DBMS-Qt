@@ -18,6 +18,7 @@
 #include "functionlist.h"
 #include "querylist.h"
 #include "tableshow.h"
+#include "userfilemanager.h"
 
 struct Database{
     QString database;
@@ -85,6 +86,9 @@ private:
     void show_tables(const QString& db_name);
     void show_schema(const QString& db_name, const QString& table_name);
 
+    //获取数据库权限
+    int getDatabaseRole(QString dbname);
+
     Ui::MainWindow *ui;
     xhydbmanager db_manager;
     SQLParser sqlParser;
@@ -139,5 +143,8 @@ private:
 
     // 由zyh新增，用于解决函数里无法使用表别名的情况
     QString removeTableAlias(const QString& col, const QString& table_alias, const QString& table_name);
+
+    //用户数据库对应权限
+    QVector<UserDatabaseInfo> userDatabaseInfo;
 };
 #endif // MAINWINDOW_H

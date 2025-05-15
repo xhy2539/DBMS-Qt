@@ -283,6 +283,10 @@ void MainWindow::handleCreateDatabase(const QString& command) {
 
         if (db_manager.createdatabase(db_name)) {
             textBuffer.append(QString("数据库 '%1' 创建成功。").arg(db_name));
+            //添加数据库
+            if(Account.getUserRole(username)!=2){
+                Account.addDatabaseToUser(username,db_name,2);
+            }
         } else {
             textBuffer.append(QString("错误: 创建数据库 '%1' 失败 (可能已存在或名称无效)。").arg(db_name));
         }
@@ -298,7 +302,7 @@ void MainWindow::handleUseDatabase(const QString& command) {
         QString db_name = match.captured(1);
         int role=-1;
         role=getDatabaseRole(db_name);
-        if(role<0){
+        if(role<0&&Account.getUserRole(username)<2){
             textBuffer.append(QString("权限不足"));
             return;
         }
